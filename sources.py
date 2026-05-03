@@ -635,41 +635,35 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
         })
 
     # ----- Phase 1: repo-name search -----
-    # HF's /api/models?search= endpoint returns at most ~1000 repos per
-    # query (verified empirically). For each query we hit two variants:
-    #
-    #   a) limit=100 + full=true: get the top 100 repos (HF's default
-    #      relevance ranking) WITH their siblings array embedded. This
-    #      lets the cheap siblings-pass match files immediately without
-    #      a follow-up tree call.
-    #
-    #   b) limit=1000 + sort=downloads&direction=-1 (no full=true,
-    #      response is small): pulls in the long tail of repos so the
-    #      canonical popular repo (e.g. stabilityai/stable-diffusion-xl-
-    #      base-1.0 with 2M dls) is in the candidate set even when the
-    #      filename query 'sd_xl_base_1.0.safetensors' alone returns
-    #      only 4 hobby mirrors. The trusted-author scorer in Phase 3
-    #      then bubbles canonical repos to the top.
+    # One HTTP call per query is enough. Empirically:
+    #   limit=1000   = HF's per-query result cap
+    #   sort=downloads&direction=-1
+    #                = applies even when search= is given, returns the
+    #                  same set of repos but ordered most-popular first
+    #   full=true    = include siblings array (the file listing per
+    #                  repo) so the siblings-pass below can match
+    #                  without a follow-up tree call. Response is
+    #                  ~0.65 MB / 0.2-0.5s for typical model queries.
+    # Combining all three means a single round-trip per query gives us
+    # popularity-ordered repos with file lists ready to scan.
     for q in _build_hf_queries(filename):
-        for url in [
-            (f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
-             f"&limit=100&full=true"),
-            (f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
-             f"&limit={limit_per_query}&sort=downloads&direction=-1"),
-        ]:
-            try:
-                data = _http_get_json(url, headers=headers, timeout=15)
-            except Exception:
-                continue
-            for repo in data:
-                add_candidate(
-                    repo.get("id") or repo.get("modelId"),
-                    via="search",
-                    query=q,
-                    siblings=repo.get("siblings"),
-                    downloads=repo.get("downloads", 0),
-                    gated=bool(repo.get("gated")),
-                )
+        url = (
+            f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
+            f"&limit={limit_per_query}&sort=downloads&direction=-1&full=true"
+        )
+        try:
+            data = _http_get_json(url, headers=headers, timeout=20)
+        except Exception:
+            continue
+        for repo in data:
+            add_candidate(
+                repo.get("id") or repo.get("modelId"),
+                via="search",
+                query=q,
+                siblings=repo.get("siblings"),
+                downloads=repo.get("downloads", 0),
+                gated=bool(repo.get("gated")),
+            )
 
     # ----- Phase 1.5: trusted-author probe -----
     # HF's filename search only returns repos whose NAME contains the
