@@ -9,6 +9,31 @@ bereits vorhandene Kopien per Hardlink wiederverwendet werden können.
 
 ---
 
+> ## ⚠️ Haftungsausschluss
+>
+> **Dieses Projekt ist "vibe-coded".** Es wurde iterativ in einem
+> Dialog mit einem KI-Coding-Assistenten entwickelt - veröffentlicht
+> weil es beim Autor funktioniert, nicht weil jeder Code-Pfad Zeile für
+> Zeile geprüft wurde.
+>
+> **Nutzung auf eigenes Risiko.** Der Autor stellt diese Software OHNE
+> jegliche Gewährleistung bereit. Der Autor übernimmt **keinerlei
+> Haftung** für irgendetwas das aus der Nutzung dieses Codes entsteht,
+> insbesondere nicht für: gelöschte oder beschädigte Dateien, Downloads
+> an falscher Stelle, vollgelaufene Festplatten, geleakte API-Tokens,
+> beschädigte ComfyUI-Installationen, unerwartete Bandbreiten- oder
+> Speicherkosten, oder sonstige direkte oder indirekte Schäden.
+>
+> Das Plugin verschiebt Dateien, löscht `.part`-Dateien unvollständiger
+> Downloads, erstellt Hardlinks/Symlinks im gesamten `models/`-Baum und
+> speichert API-Tokens in einer lokalen `config.json`. **Sichere alles
+> was du nicht verlieren kannst, bevor du es zum ersten Mal startest.**
+> Wenn möglich, erst auf einer Test-ComfyUI-Installation ausprobieren.
+>
+> Die formalen Bedingungen stehen in der [LICENSE](LICENSE)-Datei (MIT).
+
+---
+
 ## Features
 
 - **Workflow-Scan auf Knopfdruck** erkennt jede referenzierte

@@ -9,6 +9,30 @@ already have.
 
 ---
 
+> ## ⚠️ Disclaimer
+>
+> **This project was vibe-coded.** It was built iteratively in a
+> conversation with an AI coding assistant - shipped because it works
+> for the author, not because every code path was reviewed line by line.
+>
+> **Use at your own risk.** The author provides this software AS IS,
+> without warranty of any kind. The author accepts **no liability** for
+> anything that happens as a result of running this code, including but
+> not limited to: deleted or corrupted files, downloads to the wrong
+> location, exhausted disk space, leaked API tokens, broken ComfyUI
+> installations, unexpected bandwidth or storage costs, or any other
+> direct or indirect damage.
+>
+> The plugin moves files, deletes the `.part` of incomplete downloads,
+> creates hardlinks/symlinks across your `models/` tree, and stores API
+> tokens in a local `config.json`. **Back up anything you cannot afford
+> to lose before you run it for the first time.** Try it on a test
+> ComfyUI install first if you have one.
+>
+> See the [LICENSE](LICENSE) (MIT) for the formal terms.
+
+---
+
 ## Features
 
 - **One-click scan** of the loaded workflow detects every referenced
