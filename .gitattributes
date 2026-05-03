@@ -1,0 +1,16 @@
+# Normalize all text files to LF on commit. Windows clones still get
+# CRLF in the working tree thanks to core.autocrlf=true, but the repo
+# stays LF-only.
+* text=auto eol=lf
+
+# Binary types we never want munged
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.7z    binary
+*.pdf   binary

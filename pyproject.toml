@@ -1,0 +1,24 @@
+# Metadata for ComfyUI Manager / ComfyUI Registry discovery.
+# https://docs.comfy.org/registry/overview
+
+[project]
+name = "comfyui-modelsearchandload"
+description = "Scan a ComfyUI workflow for missing models and download them from HuggingFace or CivitAI into the correct folder. Optional disk-space-saving filesystem links for files you already have."
+version = "1.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+# No third-party Python dependencies — the plugin uses only the standard
+# library plus ComfyUI's already-bundled aiohttp.
+dependencies = []
+
+[project.urls]
+Homepage      = "https://github.com/CHANGEME/comfyui-modelsearchandload"
+Repository    = "https://github.com/CHANGEME/comfyui-modelsearchandload"
+Documentation = "https://github.com/CHANGEME/comfyui-modelsearchandload#readme"
+Issues        = "https://github.com/CHANGEME/comfyui-modelsearchandload/issues"
+
+[tool.comfy]
+PublisherId   = "CHANGEME"
+DisplayName   = "Model Search and Load"
+Icon          = ""

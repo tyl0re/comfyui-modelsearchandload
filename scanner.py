@@ -1,0 +1,516 @@
+"""Workflow scanner: finds model references that aren't installed locally."""
+
+from __future__ import annotations
+
+import os
+from typing import Iterable
+
+try:
+    import folder_paths  # provided by ComfyUI at runtime
+except ImportError:  # pragma: no cover - allows import outside ComfyUI
+    folder_paths = None
+
+from .config import FIELD_TO_FOLDER
+
+
+# File extensions that we consider "model files"
+MODEL_EXTS = (
+    ".safetensors", ".ckpt", ".pt", ".pth", ".bin",
+    ".onnx", ".gguf", ".sft",
+)
+
+# All folder keys we will probe when checking whether a file is *anywhere*
+# in ComfyUI's model tree. This avoids false positives where a model is
+# saved into a different folder than the field name suggests
+# (e.g. a UNet stored under "diffusion_models" but referenced via "unet_name").
+_ALL_FOLDER_KEYS = [
+    "checkpoints", "loras", "vae", "controlnet", "clip", "clip_vision",
+    "unet", "diffusion_models", "upscale_models", "embeddings",
+    "style_models", "ipadapter", "gligen", "hypernetworks",
+    "vae_approx", "photomaker", "instantid", "insightface",
+]
+
+
+def _looks_like_model_filename(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    if not v:
+        return False
+    # Reject things that are obviously not filenames (newlines = prompt text,
+    # very long values without an extension at the end of a path component)
+    if "\n" in v or len(v) > 500:
+        return False
+    # Final path component must end with a model extension
+    last = v.replace("\\", "/").rstrip("/").split("/")[-1]
+    return last.lower().endswith(MODEL_EXTS)
+
+
+# Filename extensions we consider during the filesystem walk. We use a
+# superset of MODEL_EXTS because the local index also has to recognise
+# files that ComfyUI's own folder_paths doesn't list (e.g. .onnx files).
+_LOCAL_INDEX_EXTS = (
+    ".safetensors", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".pkl", ".sft",
+    ".onnx", ".gguf", ".engine", ".trt", ".msgpack",
+)
+
+
+def _models_root_dirs() -> list[str]:
+    """Return all top-level directories that may contain model files.
+
+    Includes ComfyUI's main `models/` directory plus every directory
+    registered via folder_paths (e.g. extra_model_paths.yaml entries).
+    """
+    roots: list[str] = []
+    seen: set[str] = set()
+
+    def add(p: str):
+        if not p:
+            return
+        try:
+            ap = os.path.abspath(p)
+        except Exception:
+            return
+        if ap in seen or not os.path.isdir(ap):
+            return
+        seen.add(ap)
+        roots.append(ap)
+
+    if folder_paths is not None:
+        # Main models dir
+        try:
+            add(folder_paths.models_dir)
+        except Exception:
+            pass
+        # Every registered folder (covers extra_model_paths.yaml too)
+        for key in _ALL_FOLDER_KEYS:
+            try:
+                for p in folder_paths.get_folder_paths(key) or []:
+                    # Index the *parent* of the folder so siblings (custom
+                    # subfolders like "dwpose", "yolo", "ultralytics") are
+                    # also covered. Keep the folder itself too.
+                    add(p)
+                    add(os.path.dirname(p))
+            except Exception:
+                continue
+    return roots
+
+
+def _walk_local_files(root: str, max_files: int = 50_000) -> set[str]:
+    """Walk a root directory and return lowercased basenames + relative paths
+    of every model-extension file found. Capped at max_files to keep the scan
+    cheap on huge model libraries."""
+    out: set[str] = set()
+    count = 0
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for fn in filenames:
+            lc = fn.lower()
+            if not lc.endswith(_LOCAL_INDEX_EXTS):
+                continue
+            out.add(lc)
+            try:
+                rel = os.path.relpath(os.path.join(dirpath, fn), root).replace("\\", "/").lower()
+                out.add(rel)
+            except Exception:
+                pass
+            count += 1
+            if count >= max_files:
+                return out
+    return out
+
+
+# Cache of {folder_key: set(filenames-lowercased)} built once per scan.
+def _build_local_index() -> dict[str, set[str]]:
+    """Return a multi-source index of locally-present model files.
+
+    Three sources are combined:
+      1. ComfyUI's folder_paths.get_filename_list for each known folder
+         (cheap; populated from registered extensions only).
+      2. A direct filesystem walk of every models root directory. This
+         catches files with extensions ComfyUI doesn't register (.onnx,
+         .gguf, etc.) and files in custom subfolders (e.g. "dwpose",
+         "ultralytics") that aren't tied to a known folder key.
+      3. Bucketed by folder key so cross-folder lookups still work.
+    """
+    index: dict[str, set[str]] = {}
+    if folder_paths is None:
+        return index
+
+    # Source 1: ComfyUI's API
+    for key in _ALL_FOLDER_KEYS:
+        try:
+            files = folder_paths.get_filename_list(key)
+        except Exception:
+            continue
+        s: set[str] = set()
+        for f in files:
+            f_norm = f.replace("\\", "/")
+            s.add(f_norm.lower())
+            s.add(os.path.basename(f_norm).lower())
+        if s:
+            index[key] = s
+
+    # Source 2: filesystem walk over all model roots
+    fs_files: set[str] = set()
+    for root in _models_root_dirs():
+        try:
+            fs_files |= _walk_local_files(root)
+        except Exception:
+            continue
+    if fs_files:
+        index["_filesystem"] = fs_files
+
+    return index
+
+
+def _is_locally_present(
+    filename: str,
+    raw: str,
+    index: dict[str, set[str]],
+    expected_folder: str | None = None,
+) -> bool:
+    """True if the file referenced by `raw` exists locally in a way that
+    ComfyUI would actually find it.
+
+    Three rules:
+      1. If the workflow reference includes a subfolder (e.g.
+         "Wan2_2/foo.safetensors"), the file must exist at exactly that
+         relative path. ComfyUI's loaders look up the EXACT relative
+         string from the workflow.
+      2. If we know which folder ComfyUI expects (`expected_folder` =
+         "clip_vision", "loras", ...), the file must exist under one of
+         the registered paths for that folder. Sitting in the wrong
+         folder counts as missing.
+      3. Otherwise, any occurrence anywhere is good enough.
+    """
+    if not index:
+        return False
+    raw_norm = raw.replace("\\", "/").lstrip("/").lower()
+    has_subfolder = "/" in raw_norm
+    fn_lc = filename.lower()
+
+    if has_subfolder:
+        # Strict relative-path match across all known sources.
+        for files in index.values():
+            if raw_norm in files:
+                return True
+        return False
+
+    if expected_folder:
+        # Prefer the bucket for the expected folder. Source 1 of the index
+        # is keyed by ComfyUI's folder names and only contains files
+        # ComfyUI actually surfaces for that folder.
+        bucket = index.get(expected_folder)
+        if bucket and fn_lc in bucket:
+            return True
+        # If the folder bucket is empty (e.g. ".onnx" not in
+        # supported_pt_extensions), fall back to a direct filesystem
+        # check under that folder's registered directories.
+        if folder_paths is not None:
+            try:
+                for d in folder_paths.get_folder_paths(expected_folder) or []:
+                    if os.path.isfile(os.path.join(d, filename)):
+                        return True
+            except Exception:
+                pass
+        return False
+
+    # No folder hint -> accept any occurrence anywhere.
+    for files in index.values():
+        if fn_lc in files:
+            return True
+    return False
+
+
+def _guess_folder_for_field(field: str, value: str) -> str | None:
+    # Filename-based overrides take priority over field-name mapping. This
+    # catches cases where a generic field name (e.g. clip_name) is paired
+    # with a specifically-named file (e.g. clip_vision_h.safetensors).
+    v_lc = (value or "").lower()
+    bn_lc = os.path.basename(v_lc.replace("\\", "/"))
+
+    if "clip_vision" in bn_lc or bn_lc.startswith("clip-vision"):
+        return "clip_vision"
+    if bn_lc.startswith("clip_l") or bn_lc.startswith("clip_g") or "t5xxl" in bn_lc or "umt5" in bn_lc:
+        return "text_encoders"
+
+    # Frame interpolation models live in their own folder (registered by
+    # ComfyUI core: models/frame_interpolation/). FILM, RIFE, ...
+    if bn_lc.startswith("film_") or bn_lc.startswith("film-") or bn_lc.startswith("rife"):
+        return "frame_interpolation"
+
+    if bn_lc.endswith(".onnx"):
+        # ONNX files are NEVER checkpoints/loras/etc. Pick a folder based
+        # on what the custom-node ecosystem expects:
+        #
+        # - ComfyUI-WanAnimatePreprocess registers folder "detection" for
+        #   BOTH yolo* AND vitpose* / dwpose* models. So we route them
+        #   there together. Old DWPose preprocessors used a separate
+        #   "dwpose"/"ultralytics" folder; if you only use those, copy
+        #   the file from "detection" or symlink.
+        if ("yolo" in bn_lc or "ultralytic" in bn_lc
+                or "vitpose" in bn_lc or "dwpose" in bn_lc or "rtmpose" in bn_lc):
+            return "detection"
+        if "rmbg" in bn_lc or "isnet" in bn_lc or "u2net" in bn_lc or "briarmbg" in bn_lc:
+            return "rembg"
+        if "insightface" in bn_lc or "antelope" in bn_lc or "buffalo" in bn_lc:
+            return "insightface"
+        if "sam_" in bn_lc or "sam2" in bn_lc or "mobile_sam" in bn_lc:
+            return "sams"
+        return "onnx"  # generic fallback
+
+    if field in FIELD_TO_FOLDER:
+        return FIELD_TO_FOLDER[field]
+    f = field.lower()
+    if "ckpt" in f or "checkpoint" in f:
+        return "checkpoints"
+    if "lora" in f:
+        return "loras"
+    if "vae" in f:
+        return "vae"
+    if "controlnet" in f or "control_net" in f:
+        return "controlnet"
+    if "clip_vision" in f:
+        return "clip_vision"
+    if "clip" in f:
+        return "text_encoders"  # ComfyUI's "clip" folder IS text_encoders
+    if "unet" in f or "diffusion" in f:
+        return "diffusion_models"
+    if "upscale" in f:
+        return "upscale_models"
+    if "embedding" in f:
+        return "embeddings"
+    if "ipadapter" in f:
+        return "ipadapter"
+    if "style" in f:
+        return "style_models"
+    if "gligen" in f:
+        return "gligen"
+    if "hypernetwork" in f:
+        return "hypernetworks"
+    return None
+
+
+def _guess_folder_for_node_type(node_type: str) -> str | None:
+    nt = (node_type or "").lower()
+    if not nt:
+        return None
+    if "lora" in nt:
+        return "loras"
+    if "vae" in nt:
+        return "vae"
+    if "checkpoint" in nt or "ckpt" in nt:
+        return "checkpoints"
+    if "controlnet" in nt or "control_net" in nt:
+        return "controlnet"
+    if "upscale" in nt:
+        return "upscale_models"
+    if "clip_vision" in nt or "clipvision" in nt:
+        return "clip_vision"
+    if "clip" in nt or "dualclip" in nt or "tripleclip" in nt:
+        return "clip"
+    if "unet" in nt or "diffusion" in nt:
+        return "diffusion_models"
+    if "ipadapter" in nt:
+        return "ipadapter"
+    if "embedding" in nt:
+        return "embeddings"
+    if "style" in nt:
+        return "style_models"
+    if "gligen" in nt:
+        return "gligen"
+    if "hypernetwork" in nt:
+        return "hypernetworks"
+    if "photomaker" in nt:
+        return "photomaker"
+    if "instantid" in nt:
+        return "instantid"
+    return None
+
+
+# Node types where we know widgets_values[i] holds a model filename, mapped
+# to (index, folder_key). This is how the UI-format workflow tells us what
+# a string value means without a field name.
+UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
+    "CheckpointLoaderSimple":        [(0, "checkpoints")],
+    "CheckpointLoader":              [(0, "checkpoints")],
+    "unCLIPCheckpointLoader":        [(0, "checkpoints")],
+    "ImageOnlyCheckpointLoader":     [(0, "checkpoints")],
+    "LoraLoader":                    [(0, "loras")],
+    "LoraLoaderModelOnly":           [(0, "loras")],
+    "VAELoader":                     [(0, "vae")],
+    "ControlNetLoader":              [(0, "controlnet")],
+    "DiffControlNetLoader":          [(0, "controlnet")],
+    # Text encoders. ComfyUI exposes them under the "clip" folder name but
+    # the actual on-disk location is models/text_encoders/.
+    "CLIPLoader":                    [(0, "text_encoders")],
+    "DualCLIPLoader":                [(0, "text_encoders"), (1, "text_encoders")],
+    "TripleCLIPLoader":              [(0, "text_encoders"), (1, "text_encoders"), (2, "text_encoders")],
+    "CLIPVisionLoader":              [(0, "clip_vision")],
+    "UNETLoader":                    [(0, "diffusion_models")],
+    "StyleModelLoader":              [(0, "style_models")],
+    "UpscaleModelLoader":            [(0, "upscale_models")],
+    "GLIGENLoader":                  [(0, "gligen")],
+    "HypernetworkLoader":            [(0, "hypernetworks")],
+    "PhotoMakerLoader":              [(0, "photomaker")],
+    "IPAdapterModelLoader":          [(0, "ipadapter")],
+    "IPAdapterUnifiedLoader":        [(0, "ipadapter")],
+    # ComfyUI core: frame interpolation (FILM, RIFE, ...). Lives in
+    # models/frame_interpolation/.
+    "FrameInterpolationModelLoader": [(0, "frame_interpolation")],
+    # Kijai's ComfyUI-WanAnimatePreprocess: ViTPose + YOLO ONNX models go
+    # into models/detection/ (the node registers this folder itself).
+    # Slot 0 = vitpose_model, slot 1 = yolo_model.
+    "OnnxDetectionModelLoader":      [(0, "detection"), (1, "detection")],
+    # Generic DWPose / OpenPose preprocessors from common custom-node packs.
+    # The filename-level override in _guess_folder_for_field refines these
+    # further if the value points at a yolo / vitpose / etc. file.
+    "DwposeDetector":                [(0, "dwpose"), (1, "ultralytics")],
+    "DWPreprocessor":                [(0, "dwpose"), (1, "ultralytics")],
+    "OpenposePreprocessor":          [(0, "dwpose")],
+    "UltralyticsDetectorProvider":   [(0, "ultralytics")],
+    "YOLOWorldModelLoader":          [(0, "ultralytics")],
+}
+
+
+def _iter_api_inputs(node: dict) -> Iterable[tuple[str, str]]:
+    """API-format node: yield (field_name, value) for string inputs."""
+    inputs = node.get("inputs")
+    if isinstance(inputs, dict):
+        for k, v in inputs.items():
+            if isinstance(v, str):
+                yield k, v
+
+
+def _iter_ui_widgets(node: dict) -> Iterable[tuple[str, str, str]]:
+    """
+    UI-format node: yield (synthetic_field, value, folder_hint).
+    Only yields slots we KNOW are model filenames - prompts and other
+    string widgets are skipped to avoid false positives.
+    """
+    node_type = node.get("type") or ""
+    wv = node.get("widgets_values")
+    if not isinstance(wv, list):
+        return
+    slots = UI_NODE_MODEL_SLOTS.get(node_type)
+    if slots:
+        for idx, folder in slots:
+            if idx < len(wv) and isinstance(wv[idx], str):
+                v = wv[idx]
+                # Refine folder via filename-level override (e.g. a value
+                # ending in .onnx with "yolo" in it goes to ultralytics
+                # regardless of what the slot mapping said).
+                refined = _guess_folder_for_field(f"_widget[{idx}]", v) or folder
+                yield f"_widget[{idx}]", v, refined
+        return
+    # Heuristic fallback: only consider widget values that *look* like model
+    # filenames AND whose node type clearly indicates a model loader.
+    base_hint = _guess_folder_for_node_type(node_type)
+    if base_hint is None and "load" not in node_type.lower():
+        return
+    nt_lc = node_type.lower()
+    if "loader" not in nt_lc and "load" not in nt_lc:
+        return
+    for i, v in enumerate(wv):
+        if isinstance(v, str) and _looks_like_model_filename(v):
+            refined = _guess_folder_for_field(f"_widget[{i}]", v) or base_hint or "checkpoints"
+            yield f"_widget[{i}]", v, refined
+
+
+def scan_workflow(workflow: dict) -> list[dict]:
+    """
+    Scan a workflow JSON and return a list of missing models:
+        [{ "name": "...", "folder": "checkpoints", "node_type": "...", "field": "..." }, ...]
+
+    Models that exist anywhere in the ComfyUI model tree are excluded from
+    the result (cross-folder lookup), so this list is what is *actually* missing.
+    """
+    if not isinstance(workflow, dict):
+        return []
+
+    is_ui_format = "nodes" in workflow and isinstance(workflow["nodes"], list)
+    if is_ui_format:
+        nodes_iter = workflow["nodes"]
+    else:
+        nodes_iter = []
+        for n in workflow.values():
+            if isinstance(n, dict) and ("inputs" in n or "class_type" in n):
+                merged = dict(n)
+                merged.setdefault("type", n.get("class_type"))
+                nodes_iter.append(merged)
+
+    local_index = _build_local_index()
+    found: list[dict] = []
+    seen: set[str] = set()
+
+    for node in nodes_iter:
+        node_type = node.get("type") or node.get("class_type") or ""
+
+        candidates: list[tuple[str, str, str | None]] = []
+
+        if is_ui_format:
+            for field, value, folder_hint in _iter_ui_widgets(node):
+                candidates.append((field, value, folder_hint))
+        else:
+            for field, value in _iter_api_inputs(node):
+                if not _looks_like_model_filename(value):
+                    continue
+                folder_hint = _guess_folder_for_field(field, value) \
+                    or _guess_folder_for_node_type(node_type)
+                candidates.append((field, value, folder_hint))
+
+        for field, value, folder_hint in candidates:
+            if not _looks_like_model_filename(value):
+                continue
+            value_norm = value.replace("\\", "/").strip().lstrip("/")
+            basename = os.path.basename(value_norm)
+            # Preserve the subfolder portion of the workflow reference. This
+            # is critical for files like "Wan2_2/Wan22-...safetensors" where
+            # ComfyUI looks at the EXACT relative path under models/<folder>/.
+            # If we stripped the subfolder, the file would be downloaded next
+            # to it but ComfyUI would still report it as missing.
+            subfolder = os.path.dirname(value_norm)  # may be ""
+            # Dedupe by full relative path (case-insensitive) so the same
+            # file referenced with and without subfolder doesn't appear twice.
+            dedupe_key = value_norm.lower() if subfolder else basename.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            folder = folder_hint or "checkpoints"
+
+            # Folder-aware lookup. We pass the expected folder so the check
+            # is strict: a file in the wrong folder counts as missing,
+            # because ComfyUI's loader only looks in its registered
+            # directories. Also matches subfolder-qualified references
+            # exactly.
+            if _is_locally_present(basename, value_norm, local_index, folder):
+                continue
+            found.append({
+                "name": basename,
+                "raw": value,
+                "subfolder": subfolder,
+                "folder": folder,
+                "node_type": node_type,
+                "field": field,
+            })
+
+    return found
+
+
+def get_target_directory(folder_key: str) -> str:
+    """Return the absolute path where a model of the given type should be saved."""
+    if folder_paths is not None:
+        try:
+            paths = folder_paths.get_folder_paths(folder_key)
+            if paths:
+                return paths[0]
+        except Exception:
+            pass
+        try:
+            base = folder_paths.models_dir
+            return os.path.join(base, folder_key)
+        except Exception:
+            pass
+    # Fallback: relative to CWD
+    return os.path.join(os.getcwd(), "models", folder_key)

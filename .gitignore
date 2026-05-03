@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.tox/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Plugin runtime data — NEVER commit these
+config.json
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Test artifacts (left over from local debugging)
+__test_*.py
+__chk.mjs
+__syntax_check*.mjs

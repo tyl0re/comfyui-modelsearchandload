@@ -1,0 +1,86 @@
+{
+  "v1-5-pruned-emaonly.safetensors": {
+    "folder": "checkpoints",
+    "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+    "source": "huggingface",
+    "size": 4265146304
+  },
+  "sd_xl_base_1.0.safetensors": {
+    "folder": "checkpoints",
+    "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+    "source": "huggingface",
+    "size": 6938078334
+  },
+  "sd_xl_refiner_1.0.safetensors": {
+    "folder": "checkpoints",
+    "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+    "source": "huggingface",
+    "size": 6075981930
+  },
+  "sdxl_vae.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors",
+    "source": "huggingface"
+  },
+  "vae-ft-mse-840000-ema-pruned.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors",
+    "source": "huggingface"
+  },
+  "flux1-dev.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors",
+    "source": "huggingface",
+    "gated": true
+  },
+  "flux1-schnell.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+    "source": "huggingface"
+  },
+  "ae.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
+    "source": "huggingface"
+  },
+  "clip_l.safetensors": {
+    "folder": "clip",
+    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+    "source": "huggingface"
+  },
+  "t5xxl_fp16.safetensors": {
+    "folder": "clip",
+    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+    "source": "huggingface"
+  },
+  "t5xxl_fp8_e4m3fn.safetensors": {
+    "folder": "clip",
+    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+    "source": "huggingface"
+  },
+  "4x-UltraSharp.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/Kim2091/UltraSharp/resolve/main/4x-UltraSharp.pth",
+    "source": "huggingface"
+  },
+  "RealESRGAN_x4plus.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus.pth",
+    "source": "huggingface"
+  },
+  "control_v11p_sd15_canny.pth": {
+    "folder": "controlnet",
+    "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
+    "source": "huggingface"
+  },
+  "control_v11p_sd15_openpose.pth": {
+    "folder": "controlnet",
+    "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+    "source": "huggingface"
+  },
+  "control_v11f1p_sd15_depth.pth": {
+    "folder": "controlnet",
+    "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
+    "source": "huggingface"
+  }
+}
