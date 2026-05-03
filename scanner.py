@@ -220,15 +220,15 @@ def _is_locally_present(
         return False
 
     if expected_folder:
-        # Prefer the bucket for the expected folder. Source 1 of the index
-        # is keyed by ComfyUI's folder names and only contains files
-        # ComfyUI actually surfaces for that folder.
+        # 1. Bucket keyed by ComfyUI's folder name. Source 1 of the
+        #    index only contains files folder_paths surfaces for that
+        #    folder (limited by supported_pt_extensions).
         bucket = index.get(expected_folder)
         if bucket and fn_lc in bucket:
             return True
-        # If the folder bucket is empty (e.g. ".onnx" not in
-        # supported_pt_extensions), fall back to a direct filesystem
-        # check under that folder's registered directories.
+        # 2. Direct filesystem probe of the registered ComfyUI folder
+        #    paths for this key. Catches files that folder_paths
+        #    doesn't list because of extension filtering (.onnx etc.).
         if folder_paths is not None:
             try:
                 for d in folder_paths.get_folder_paths(expected_folder) or []:
@@ -236,6 +236,15 @@ def _is_locally_present(
                         return True
             except Exception:
                 pass
+        # 3. The expected folder may be a logical name we map to a
+        #    custom-node-internal directory (e.g. 'controlnet_aux' ->
+        #    custom_nodes/comfyui_controlnet_aux/ckpts). Probe that
+        #    directly. Without this, files downloaded by the manager
+        #    would forever appear as missing because the folder isn't
+        #    registered with folder_paths.
+        target_dir = get_target_directory(expected_folder)
+        if target_dir and os.path.isfile(os.path.join(target_dir, filename)):
+            return True
         return False
 
     # No folder hint -> accept any occurrence anywhere.
