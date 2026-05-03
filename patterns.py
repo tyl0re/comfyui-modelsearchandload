@@ -218,6 +218,105 @@ _RULES: list[dict] = [
         "source": "huggingface",
         "title":  "lllyasviel/ControlNet-v1-1 \\g<1>",
     },
+
+    # -----------------------------------------------------------------
+    # AnimateLCM by wangfuyun - canonical T2V motion module + LoRA
+    # -----------------------------------------------------------------
+    {
+        "pattern": re.compile(r"^animatelcm[_]?sd15[_]?t2v\.ckpt$"),
+        "url":    "https://huggingface.co/wangfuyun/AnimateLCM/resolve/main/AnimateLCM_sd15_t2v.ckpt",
+        "folder": "animatediff_models",
+        "size":   1813021123,
+        "source": "huggingface",
+        "title":  "wangfuyun/AnimateLCM (T2V motion module)",
+    },
+    {
+        "pattern": re.compile(r"^animatelcm[_]?sd15[_]?t2v[_]?lora\.safetensors$"),
+        "url":    "https://huggingface.co/wangfuyun/AnimateLCM/resolve/main/AnimateLCM_sd15_t2v_lora.safetensors",
+        "folder": "loras",
+        "size":   134579344,
+        "source": "huggingface",
+        "title":  "wangfuyun/AnimateLCM (T2V LoRA)",
+    },
+    {
+        "pattern": re.compile(r"^animatelcm[_]?i2v\.ckpt$"),
+        "url":    "https://huggingface.co/wangfuyun/AnimateLCM-I2V/resolve/main/AnimateLCM_sd15_i2v.ckpt",
+        "folder": "animatediff_models",
+        "source": "huggingface",
+        "title":  "wangfuyun/AnimateLCM-I2V",
+    },
+
+    # -----------------------------------------------------------------
+    # AnimateDiff motion modules (guoyww/animatediff)
+    # mm_sd_v14, mm_sd_v15, mm_sd_v15_v2, v3_sd15_mm, mm_sdxl_v10_beta
+    # -----------------------------------------------------------------
+    {
+        "pattern": re.compile(r"^mm[_]?sd[_]?(v14|v15|v15_v2)\.ckpt$"),
+        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_\\g<1>.ckpt",
+        "folder": "animatediff_models",
+        "source": "huggingface",
+        "title":  "guoyww/animatediff mm_sd_\\g<1>",
+    },
+    {
+        "pattern": re.compile(r"^mm[_]?sdxl[_]?v10[_]?beta\.ckpt$"),
+        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sdxl_v10_beta.ckpt",
+        "folder": "animatediff_models",
+        "source": "huggingface",
+        "title":  "guoyww/animatediff SDXL v1.0 beta",
+    },
+    {
+        "pattern": re.compile(r"^v3[_]?sd15[_]?(mm|adapter|sparsectrl_rgb|sparsectrl_scribble)\.ckpt$"),
+        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_\\g<1>.ckpt",
+        "folder": "animatediff_models",
+        "source": "huggingface",
+        "title":  "guoyww/animatediff v3_sd15_\\g<1>",
+    },
+    # Motion LoRAs (camera control): v2_lora_PanLeft.ckpt, etc. We list
+    # them explicitly so the case-sensitive part of the filename
+    # (PanLeft, ZoomIn, ...) maps to the exact case HuggingFace expects -
+    # capture-group backrefs would always be lower-cased by our
+    # normaliser before matching.
+    *[
+        {
+            "pattern": re.compile(rf"^v2[_]?lora[_]?{name.lower()}\.ckpt$"),
+            "url":    f"https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_{name}.ckpt",
+            "folder": "animatediff_motion_lora",
+            "source": "huggingface",
+            "title":  f"guoyww/animatediff motion LoRA {name}",
+        }
+        for name in (
+            "PanLeft", "PanRight",
+            "ZoomIn", "ZoomOut",
+            "TiltUp", "TiltDown",
+            "RollingClockwise", "RollingAnticlockwise",
+        )
+    ],
+
+    # -----------------------------------------------------------------
+    # Real-ESRGAN family of upscalers
+    # -----------------------------------------------------------------
+    {
+        "pattern": re.compile(r"^realesrgan[_]?x4plus[_]?anime[_]?6b\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
+        "folder": "upscale_models",
+        "size":   17938799,
+        "source": "huggingface",
+        "title":  "ai-forever/Real-ESRGAN (anime 6B)",
+    },
+    {
+        "pattern": re.compile(r"^realesrgan[_]?x2plus\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2plus.pth",
+        "folder": "upscale_models",
+        "source": "huggingface",
+        "title":  "ai-forever/Real-ESRGAN (x2)",
+    },
+    {
+        "pattern": re.compile(r"^realesr[_]?general[_]?x4v3\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/realesr-general-x4v3.pth",
+        "folder": "upscale_models",
+        "source": "huggingface",
+        "title":  "ai-forever/Real-ESRGAN (general x4 v3)",
+    },
 ]
 
 

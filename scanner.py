@@ -284,6 +284,33 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
             or bn_lc.startswith("t2iadapter_") or bn_lc.startswith("t2i-adapter")):
         return "controlnet"
 
+    # AnimateDiff motion modules vs LoRAs. These are NOT regular
+    # checkpoints despite the .ckpt extension. We split here:
+    #   *_lora.safetensors -> loras (it's a regular LoRA file applied
+    #                          via standard LoraLoader)
+    #   everything else    -> animatediff_models
+    looks_animatediff_family = (
+        bn_lc.startswith("animatelcm")
+        or bn_lc.startswith("mm_sd_v")
+        or bn_lc.startswith("mm_sdxl_v")
+        or bn_lc.startswith("v3_sd15_mm")
+        or bn_lc.startswith("v3_sd15_adapter")
+        or bn_lc.startswith("v3_sd15_sparsectrl")
+        or bn_lc.startswith("temporaldiff-")
+        or bn_lc.startswith("hsxl_temporal")
+        or "_motion_module" in bn_lc
+    )
+    if looks_animatediff_family:
+        # AnimateLCM_sd15_t2v_lora.safetensors is a regular LoRA, not a
+        # motion module. Same for any other ..._lora.* sibling.
+        if "_lora" in bn_lc or bn_lc.endswith("_lora.safetensors"):
+            return "loras"
+        return "animatediff_models"
+
+    # AnimateDiff motion LoRAs (camera control). Live in animatediff_motion_lora.
+    if bn_lc.startswith("v2_lora_") or bn_lc.startswith("v3_lora_"):
+        return "animatediff_motion_lora"
+
     if bn_lc.endswith(".onnx"):
         # ONNX files are NEVER checkpoints/loras/etc. Pick a folder based
         # on what the custom-node ecosystem expects:
@@ -421,6 +448,15 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     # folder name 'controlnet_aux' to that path in get_target_directory().
     "DepthAnythingPreprocessor":     [(0, "controlnet_aux")],
     "Zoe_DepthAnythingPreprocessor": [(0, "controlnet_aux")],
+    # AnimateDiff-Evolved loaders. The motion-module ckpt lives in
+    # models/animatediff_models/ (registered by the pack).
+    "ADE_AnimateDiffLoaderGen1":         [(0, "animatediff_models")],
+    "ADE_AnimateDiffLoaderWithContext":  [(0, "animatediff_models")],
+    "ADE_LoadAnimateDiffModel":          [(0, "animatediff_models")],
+    "ADE_LoadAnimateLCMI2VModel":        [(0, "animatediff_models")],
+    "ADE_AnimateDiffLoRALoader":         [(0, "animatediff_motion_lora")],
+    "AnimateDiffLoaderV1":                [(0, "animatediff_models")],
+    "AnimateDiffModuleLoader":            [(0, "animatediff_models")],
 }
 
 
