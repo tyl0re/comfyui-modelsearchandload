@@ -20,16 +20,18 @@ from .patterns import (
 
 USER_AGENT = "ComfyUI-ModelDownloader/1.0"
 
-# Tokens that show up in almost every model filename and tell HF nothing.
-# We avoid using these as standalone search queries.
-_STOPWORDS = {
-    "model", "models", "lora", "loras", "ckpt", "checkpoint", "vae",
-    "controlnet", "control", "net", "clip", "unet", "diffusion",
-    "embedding", "embeddings", "upscale", "upscaler", "ema", "fp8", "fp16",
-    "fp32", "bf16", "int8", "int4", "q4", "q5", "q6", "q8", "gguf",
-    "safetensors", "pruned", "pt", "pth", "bin", "rank", "step", "steps",
-    "low", "high", "noise", "base", "refiner", "edit", "main", "final",
-    "version", "v1", "v2", "v3", "test", "release", "merged",
+# Tokens we filter out as STANDALONE search queries because they're far
+# too generic to land us in the right repo on their own. We deliberately
+# keep them in token COMBINATIONS though - 'stable-diffusion-xl-base'
+# (which contains stopwords like 'base') is a perfectly good query.
+_STOPWORDS_ALONE = {
+    # File-extension-noise and quantisation suffixes
+    "safetensors", "ckpt", "pt", "pth", "bin", "gguf", "sft",
+    "fp8", "fp16", "fp32", "bf16", "int8", "int4",
+    "q4", "q5", "q6", "q8",
+    "ema", "pruned", "merged", "final",
+    # Single-letter / two-letter noise
+    "v1", "v2", "v3", "v4", "v5",
 }
 
 # HuggingFace authors / orgs that publish canonical model files. Repos
@@ -185,28 +187,32 @@ def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> di
 
 # ---------- Filename tokenization ----------
 
-def _tokenize_filename(filename: str) -> list[str]:
-    """Extract distinctive search tokens from a model filename.
+def _split_tokens(filename: str) -> list[str]:
+    """Split a filename into ordered tokens, preserving original order
+    and case. Splits on common filename separators.
 
-    Removes file extension, splits on common separators, filters out pure
-    numbers and stopwords, and orders by 'distinctiveness' (length + presence
-    of letters+digits) so the most useful queries come first.
+    Unlike _tokenize_filename, this keeps EVERY token (no stopword
+    filter) because some queries need consecutive token spans like
+    'sd_xl_base' or 'stable-diffusion-xl-base'.
     """
     base = filename.rsplit(".", 1)[0]
     raw = re.split(r"[_\-.\s/]+", base)
+    return [t for t in raw if t]
+
+
+def _tokenize_filename(filename: str) -> list[str]:
+    """Extract distinctive search tokens for use as STANDALONE queries.
+
+    Filters out short / pure-digit / safetensors-noise tokens and orders
+    by distinctiveness (length + letter+digit mix).
+    """
     keep: list[str] = []
-    for t in raw:
-        if not t:
-            continue
+    for t in _split_tokens(filename):
         if len(t) < 3:
             continue
         if t.isdigit():
             continue
-        if re.fullmatch(r"\d+\w?", t):  # things like "4step" -> drop trailing-digit-only? No, keep if has letters
-            # Re-check: this regex matches "4step" because of \w. Only drop if all-digit prefix + 1 letter.
-            # Actually allow it; it might be useful.
-            pass
-        if t.lower() in _STOPWORDS:
+        if t.lower() in _STOPWORDS_ALONE:
             continue
         keep.append(t)
 
@@ -222,29 +228,58 @@ def _tokenize_filename(filename: str) -> list[str]:
 
 
 def _build_hf_queries(filename: str) -> list[str]:
-    """Return a ranked list of HF search queries to try for this filename."""
-    tokens = _tokenize_filename(filename)
+    """Return a ranked list of HF search queries to try for this filename.
+
+    Strategy:
+      1. The full filename (with and without extension) - catches files
+         hosted in repos named after the filename verbatim.
+      2. ALL consecutive token spans of length >= 2, joined with hyphen.
+         For 'sd_xl_base_1.0.safetensors' this yields:
+           'sd-xl-base-1-0', 'sd-xl-base-1', 'sd-xl-base',
+           'sd-xl', 'xl-base-1-0', ..., 'base-1-0',
+         which means 'stable-diffusion-xl-base' style repo names get
+         hit by 'sd-xl-base' or 'xl-base'.
+      3. Same spans joined with underscore (for repos that follow the
+         filename's separator style).
+      4. Distinctive standalone tokens as a fallback.
+    """
     queries: list[str] = []
     seen: set[str] = set()
 
     def add(q: str):
         q = q.strip()
-        if q and q.lower() not in seen:
-            seen.add(q.lower())
-            queries.append(q)
+        if not q:
+            return
+        # Same query in different separators counts as the same
+        norm = q.lower().replace("_", "-").replace(" ", "-")
+        if norm in seen:
+            return
+        seen.add(norm)
+        queries.append(q)
 
-    # Always try the full filename first (works for famous files)
     add(filename)
-    # Filename without extension
     add(filename.rsplit(".", 1)[0])
-    # Top single tokens
-    for t in tokens[:3]:
+
+    # Consecutive token spans, longest first (more distinctive)
+    parts = _split_tokens(filename)
+    spans: list[list[str]] = []
+    for span_len in range(min(len(parts), 5), 1, -1):  # 5..2 inclusive
+        for start in range(0, len(parts) - span_len + 1):
+            spans.append(parts[start:start + span_len])
+    for span in spans:
+        # Skip spans that are entirely stopwords / noise
+        if all(t.lower() in _STOPWORDS_ALONE or t.isdigit() for t in span):
+            continue
+        add("-".join(span))
+        add("_".join(span))
+
+    # Distinctive standalone tokens as last resort
+    for t in _tokenize_filename(filename)[:3]:
         add(t)
-    # Pairs of distinctive tokens
-    for i in range(min(3, len(tokens))):
-        for j in range(i + 1, min(5, len(tokens))):
-            add(f"{tokens[i]} {tokens[j]}")
-    return queries[:8]  # cap to keep latency reasonable
+
+    # Cap to keep latency reasonable. We do 2 HTTP calls per query
+    # (with + without sort), so 8 queries = 16 round-trips worst case.
+    return queries[:10]
 
 
 def _build_hf_fulltext_queries(filename: str) -> list[str]:
@@ -319,6 +354,112 @@ def _hf_get_repo_meta(repo_id: str) -> dict | None:
         )
     except Exception:
         return None
+
+
+# Per-author hint tokens. When the filename contains one of these
+# substrings (case-insensitive), the matching trusted author is probed
+# directly via /api/models?author=...&full=true. This is what reaches
+# canonical repos that HF's filename search can't surface.
+#
+# Keys are case-sensitive HF org names; values are lowercase substrings
+# we look for in the filename.
+_AUTHOR_FILENAME_HINTS: dict[str, tuple[str, ...]] = {
+    "stabilityai":       ("sd_xl", "sdxl_", "sd_xl_", "stable_diffusion", "stable-diffusion", "sd-vae", "sdvae", "sd-turbo", "vae-ft-mse", "vae_ft_mse"),
+    "black-forest-labs": ("flux", "ae.safe", "ae.bin"),
+    "runwayml":          ("v1-5-pruned", "v1_5_pruned", "stable-diffusion-v1-5"),
+    "comfyanonymous":    ("clip_l.", "clip_g.", "t5xxl", "flux_text"),
+    "Comfy-Org":         ("sigclip", "frame_interp", "rife", "v1-5-pruned"),
+    "lllyasviel":        ("control_", "controlnet", "annotator", "realesrgan_x4plus.pth"),
+    "h94":               ("ip-adapter", "ip_adapter", "image_encoder", "clip-vit-h-14-laion", "clip-vit-bigg"),
+    "latent-consistency":("lcm-lora", "lcm_lora"),
+    "ai-forever":        ("realesrgan_x2", "realesrgan_x4", "realesrgan_x8", "real-esrgan"),
+    "wangfuyun":         ("animatelcm",),
+    "guoyww":            ("mm_sd_v", "mm_sdxl", "v3_sd15", "v2_lora_"),
+    "depth-anything":    ("depth_anything_v2", "depth-anything-v2"),
+    "LiheYoung":         ("depth_anything_vit",),
+    "Kim2091":           ("ultrasharp",),
+    "Kijai":             ("kijai", "wanvideo", "ltx2", "z-image", "hunyuanvideo"),
+}
+
+
+def _authors_for_filename(filename: str, max_authors: int = 3) -> list[str]:
+    """Return up to `max_authors` trusted-author names whose hint tokens
+    appear in the filename. Returned in descending hint-match-count order
+    so the most specific author is tried first."""
+    fn_lc = filename.lower()
+    scored: list[tuple[int, str]] = []
+    for author, hints in _AUTHOR_FILENAME_HINTS.items():
+        score = sum(1 for h in hints if h in fn_lc)
+        if score > 0:
+            scored.append((score, author))
+    scored.sort(reverse=True)
+    return [a for _, a in scored[:max_authors]]
+
+
+# Cache of {author: (timestamp, [repos_with_siblings])}. Listing all of
+# stabilityai's 100 repos is expensive enough to keep around for a while.
+_author_repo_cache: dict[str, tuple[float, list[dict]]] = {}
+_AUTHOR_CACHE_TTL_S = 600  # 10 minutes
+
+
+def _hf_list_author_repos(author: str, limit: int = 100) -> list[dict]:
+    """List up to `limit` repos by an author, sorted by downloads desc.
+    Each repo dict carries its `siblings` array so we can match files
+    without a follow-up request. Cached for _AUTHOR_CACHE_TTL_S seconds."""
+    cached = _author_repo_cache.get(author)
+    if cached and (time.time() - cached[0]) < _AUTHOR_CACHE_TTL_S:
+        return cached[1]
+    url = (
+        f"https://huggingface.co/api/models?author={urllib.parse.quote(author)}"
+        f"&sort=downloads&direction=-1&limit={limit}&full=true"
+    )
+    try:
+        repos = _http_get_json(url, headers=_hf_headers(), timeout=15)
+    except Exception:
+        return []
+    _author_repo_cache[author] = (time.time(), repos)
+    return repos
+
+
+def _hf_probe_trusted_authors(filename: str, max_authors: int = 3) -> list[dict]:
+    """For each trusted author whose hint tokens match the filename, list
+    their top repos and check whether any has the file in its `siblings`.
+
+    This is what catches canonical repos that HF's normal /api/models
+    ?search= endpoint never returns - filename-based search returns only
+    repos whose NAME contains the filename, but stabilityai's repos are
+    named 'stable-diffusion-xl-base-1.0', not 'sd_xl_base_1.0.safetensors'.
+
+    Returns a list of candidate dicts ready to be fed into the same
+    confirmed-list pipeline as repo-search results. Each carries the
+    sibling array so the calling code's siblings-pass picks them up
+    without an extra round-trip.
+    """
+    target = filename.lower()
+    out: list[dict] = []
+    for author in _authors_for_filename(filename, max_authors=max_authors):
+        repos = _hf_list_author_repos(author, limit=100)
+        for repo in repos:
+            repo_id = repo.get("id") or repo.get("modelId")
+            if not repo_id:
+                continue
+            siblings = repo.get("siblings") or []
+            # Look for the filename anywhere in the sibling list (top
+            # level OR in a subfolder like models/image_encoder/).
+            for s in siblings:
+                rfn = (s.get("rfilename") or "").replace("\\", "/")
+                rfn_base = rfn.rsplit("/", 1)[-1]
+                if rfn.lower() == target or rfn_base.lower() == target:
+                    out.append({
+                        "repo": repo_id,
+                        "via": "trusted-author",
+                        "_query": f"(author:{author})",
+                        "siblings": siblings,
+                        "downloads": repo.get("downloads", 0),
+                        "gated": bool(repo.get("gated")),
+                    })
+                    break  # one match per repo is enough
+    return out
 
 
 # Well-known umbrella repos that host many ComfyUI models, often nested in
@@ -456,7 +597,7 @@ def _repo_seems_relevant(repo_id: str, filename_tokens: set[str]) -> bool:
     return any(t.lower() in repo_words or t.lower() in repo_lc for t in filename_tokens)
 
 
-def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
+def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]:
     """Search HuggingFace for the given filename, trying multiple strategies.
 
     Strategy (most to least specific):
@@ -494,21 +635,30 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
         })
 
     # ----- Phase 1: repo-name search -----
-    # We hit the same query twice: once with HF's default ranking
-    # (relevance / name match) and once sorted by download count
-    # descending. The default ranking is needed because HF doesn't
-    # always return the canonical popular repo for filename-style
-    # queries, but the popularity-sorted variant catches it when it
-    # IS in the index (e.g. 'stable-diffusion-xl-base' returns
-    # stabilityai/... with 2M dls at top under sort=downloads).
+    # HF's /api/models?search= endpoint returns at most ~1000 repos per
+    # query (verified empirically). For each query we hit two variants:
+    #
+    #   a) limit=100 + full=true: get the top 100 repos (HF's default
+    #      relevance ranking) WITH their siblings array embedded. This
+    #      lets the cheap siblings-pass match files immediately without
+    #      a follow-up tree call.
+    #
+    #   b) limit=1000 + sort=downloads&direction=-1 (no full=true,
+    #      response is small): pulls in the long tail of repos so the
+    #      canonical popular repo (e.g. stabilityai/stable-diffusion-xl-
+    #      base-1.0 with 2M dls) is in the candidate set even when the
+    #      filename query 'sd_xl_base_1.0.safetensors' alone returns
+    #      only 4 hobby mirrors. The trusted-author scorer in Phase 3
+    #      then bubbles canonical repos to the top.
     for q in _build_hf_queries(filename):
-        for sort_param in ("", "&sort=downloads&direction=-1"):
-            url = (
-                f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
-                f"&limit={limit_per_query}&full=true{sort_param}"
-            )
+        for url in [
+            (f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
+             f"&limit=100&full=true"),
+            (f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
+             f"&limit={limit_per_query}&sort=downloads&direction=-1"),
+        ]:
             try:
-                data = _http_get_json(url, headers=headers, timeout=12)
+                data = _http_get_json(url, headers=headers, timeout=15)
             except Exception:
                 continue
             for repo in data:
@@ -520,6 +670,22 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
                     downloads=repo.get("downloads", 0),
                     gated=bool(repo.get("gated")),
                 )
+
+    # ----- Phase 1.5: trusted-author probe -----
+    # HF's filename search only returns repos whose NAME contains the
+    # filename string. For canonical files like 'sd_xl_base_1.0.safetensors'
+    # the only matches are tiny hobby mirrors (youneeds/sd_xl_base_1.0...
+    # etc.) - the real stabilityai repo isn't there because its name is
+    # 'stable-diffusion-xl-base-1.0'. So when the filename hints at a
+    # known org (stabilityai, black-forest-labs, comfyanonymous, ...),
+    # we list ALL their repos directly and check each repo's siblings
+    # for the file. Cached for 10 minutes.
+    for trusted in _hf_probe_trusted_authors(filename, max_authors=3):
+        # Inject directly into candidates - they already have their
+        # siblings arrays so Phase 3a will accept them immediately.
+        if trusted["repo"] not in seen_repos:
+            seen_repos.add(trusted["repo"])
+            candidates.append(trusted)
 
     # ----- Phase 2: full-text README search -----
     # This is what catches files like film_net_fp16 (mentioned in README of
@@ -775,20 +941,41 @@ def _candidate_sort_key(c: dict) -> tuple:
     Order of precedence:
       1. Curated DB entries (`preferred=True`) always come first - they're
          hand-picked for the file in question.
-      2. By download count, descending. The official Wan2.2 LoRA repo with
-         1.2M downloads outranks a random fork with 0 downloads.
-      3. HuggingFace before CivitAI when downloads tie - HF is more
+      2. Trusted-author candidates. Whether the candidate came from the
+         dedicated trusted-author probe (_via='trusted-author') OR was
+         pulled in by the normal search but its repo happens to be from
+         a canonical org (stabilityai, black-forest-labs, comfyanonymous,
+         lllyasviel, h94, latent-consistency, ai-forever, ...). Either
+         way: very high confidence.
+      3. By download count, descending. The official Wan2.2 LoRA repo
+         with 1.2M downloads outranks a random fork with 0 downloads.
+      4. HuggingFace before CivitAI when downloads tie - HF is more
          reliably accessible (no token usually needed).
-      4. Stable: by title for deterministic ordering when everything else
+      5. Stable: by title for deterministic ordering when everything else
          is equal.
     """
     preferred = 0 if c.get("preferred") else 1
+    # Promote any candidate whose REPO ID is from a trusted org, not just
+    # the ones the trusted-author probe found explicitly. The 'repo' key
+    # is set on dict-shaped Phase-1 candidates; lookup_known/pattern
+    # entries might use 'title' instead. Try both.
+    repo_id = c.get("repo") or ""
+    if not repo_id:
+        # Try to extract from title 'owner/repo/path/file'
+        title = c.get("title") or ""
+        if title.count("/") >= 1:
+            repo_id = "/".join(title.split("/")[:2])
+    is_trusted = (
+        c.get("_via") == "trusted-author"
+        or _trusted_author(repo_id)
+    )
+    via_rank = 0 if is_trusted else 1
     # Negative because Python sorts ascending; we want highest downloads first.
     downloads = -int(c.get("downloads") or 0)
     src = c.get("source", "")
     src_rank = {"known": 0, "huggingface": 1, "civitai": 2}.get(src, 3)
     title = (c.get("title") or "").lower()
-    return (preferred, downloads, src_rank, title)
+    return (preferred, via_rank, downloads, src_rank, title)
 
 
 def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]:

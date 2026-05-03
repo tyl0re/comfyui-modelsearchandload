@@ -1,116 +1,7 @@
 {
-  "_comment": "Curated database of model file -> direct download URL. Each entry can declare 'aliases' for alternative filenames the same model is referenced by. Use this for ONE file with several spellings (community renames, hyphen vs underscore, upstream filename != ComfyUI filename). Use patterns.py instead for FAMILIES of files that share a generic shape (e.g. control_v11p_sd15_<task>.pth).",
+  "_comment": "Curated database for files where the search pipeline cannot reliably return the canonical repo as Top-1 hit. Each entry has '_reason' explaining WHY it must stay hardcoded. Re-run tools/find_redundant.py periodically: as HF's search index improves or as we add patterns, entries here can be removed.",
 
-  "_section_stable_diffusion": "SDXL files where HF search returns hobby mirrors before the canonical stabilityai repo (filename appears in repo names of the wrong-but-similar repos).",
-  "sd_xl_base_1.0.safetensors": {
-    "folder": "checkpoints",
-    "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
-    "source": "huggingface",
-    "size": 6938078334
-  },
-  "sd_xl_refiner_1.0.safetensors": {
-    "folder": "checkpoints",
-    "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
-    "source": "huggingface",
-    "size": 6075981930
-  },
-  "vae-ft-mse-840000-ema-pruned.safetensors": {
-    "folder": "vae",
-    "url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors",
-    "source": "huggingface"
-  },
-
-  "_section_flux": "FLUX VAE only. flux1-dev/-schnell are now found by search (trusted-author boost picks black-forest-labs first); the autoencoder is not because 'ae.safetensors' is too generic a filename.",
-  "ae.safetensors": {
-    "folder": "vae",
-    "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
-    "source": "huggingface"
-  },
-
-  "_section_text_encoders": "Text encoders for FLUX / SD3. The filenames clip_l.safetensors and t5xxl_*.safetensors appear in dozens of repos as side-files (SD3.5 etc.); we want comfyanonymous's standalone files which the search doesn't pick first.",
-  "clip_l.safetensors": {
-    "folder": "text_encoders",
-    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
-    "source": "huggingface"
-  },
-  "t5xxl_fp16.safetensors": {
-    "folder": "text_encoders",
-    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
-    "source": "huggingface"
-  },
-  "t5xxl_fp8_e4m3fn.safetensors": {
-    "folder": "text_encoders",
-    "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
-    "source": "huggingface"
-  },
-
-  "_section_upscalers": "Upscalers where the search picks lower-case mirrors first (filename case sensitivity).",
-  "4x-UltraSharp.pth": {
-    "folder": "upscale_models",
-    "url": "https://huggingface.co/Kim2091/UltraSharp/resolve/main/4x-UltraSharp.pth",
-    "source": "huggingface",
-    "aliases": ["4x_UltraSharp.pth", "4xUltraSharp.pth", "ultrasharp.pth", "ultrasharp_4x.pth"]
-  },
-  "RealESRGAN_x4plus.pth": {
-    "folder": "upscale_models",
-    "url": "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRGAN_x4plus.pth",
-    "source": "huggingface",
-    "size": 67040989
-  },
-  "RealESRGAN_x8.pth": {
-    "folder": "upscale_models",
-    "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x8.pth",
-    "source": "huggingface",
-    "aliases": ["RealESRGAN_x8plus.pth"]
-  },
-
-  "_section_lcm_lora": "Latent Consistency Model LoRAs. Repo files all named pytorch_lora_weights.safetensors so search can't disambiguate which LoRA the workflow asked for; the entry pins the repo and the aliases catch ComfyUI workflow rename variants.",
-  "lcm-lora-sdv1-5.safetensors": {
-    "folder": "loras",
-    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
-    "source": "huggingface",
-    "size": 134621556,
-    "aliases": [
-      "LCM_LoRA_Weights_SD15.safetensors",
-      "LCM_LoRA_SD15.safetensors",
-      "lcm_lora_sd15.safetensors",
-      "lcm_lora_weights_sd15.safetensors",
-      "lcm-lora-sd15.safetensors"
-    ]
-  },
-  "lcm-lora-sdxl.safetensors": {
-    "folder": "loras",
-    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
-    "source": "huggingface",
-    "size": 393854592,
-    "aliases": [
-      "LCM_LoRA_Weights_SDXL.safetensors",
-      "LCM_LoRA_SDXL.safetensors",
-      "lcm_lora_sdxl.safetensors",
-      "lcm_lora_weights_sdxl.safetensors"
-    ]
-  },
-  "lcm-lora-ssd-1b.safetensors": {
-    "folder": "loras",
-    "url": "https://huggingface.co/latent-consistency/lcm-lora-ssd-1b/resolve/main/pytorch_lora_weights.safetensors",
-    "source": "huggingface",
-    "aliases": [
-      "LCM_LoRA_SSD_1B.safetensors",
-      "lcm_lora_ssd_1b.safetensors"
-    ]
-  },
-
-  "_section_clip_vision": "CLIP Vision encoders for IP-Adapter. The IP-Adapter image_encoder is at h94/IP-Adapter/models/image_encoder/model.safetensors - search finds many other CLIP-ViT-H mirrors with different fine-tunes first. The sigclip alias 'clip_vision_h.safetensors' is also kept here because it's a community rename, not a real filename.",
-  "sigclip_vision_patch14_384.safetensors": {
-    "folder": "clip_vision",
-    "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
-    "source": "huggingface",
-    "size": 856506240,
-    "aliases": [
-      "clip_vision_h.safetensors",
-      "sigclip_vision_384.safetensors"
-    ]
-  },
+  "_section_clip_vision_h94": "h94/IP-Adapter has only 2 visible repos in its public listing - the IP-Adapter image_encoder is bundled inside one of them as 'models/image_encoder/model.safetensors' (or sdxl_models/.../model.safetensors). HF search can't find them by the workflow filename because the upstream filename is generic 'model.safetensors'. Comfy-Org has _repackaged mirrors that win the regular search.",
   "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors": {
     "folder": "clip_vision",
     "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
@@ -122,7 +13,8 @@
       "ip_adapter_image_encoder_sd15.safetensors",
       "ipadapter_image_encoder_sd15.safetensors",
       "image_encoder_sd15.safetensors"
-    ]
+    ],
+    "_reason": "Upstream is models/image_encoder/model.safetensors inside h94/IP-Adapter. Comfy-Org/clip-vit-h-14-laion2b-s32b-b79k_repackaged also hosts a copy and HF search prefers it because the repo name matches the filename better."
   },
   "CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors": {
     "folder": "clip_vision",
@@ -135,126 +27,85 @@
       "ip_adapter_image_encoder_sdxl.safetensors",
       "ipadapter_image_encoder_sdxl.safetensors",
       "image_encoder_sdxl.safetensors"
-    ]
+    ],
+    "_reason": "Same as CLIP-ViT-H - upstream is sdxl_models/image_encoder/model.safetensors inside h94/IP-Adapter."
   },
-  "clip_vision_g.safetensors": {
+  "sigclip_vision_patch14_384.safetensors": {
     "folder": "clip_vision",
-    "url": "https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors",
+    "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
     "source": "huggingface",
-    "size": 3689912664
+    "size": 856506240,
+    "aliases": ["clip_vision_h.safetensors", "sigclip_vision_384.safetensors"],
+    "_reason": "Comfy-Org has multiple repos containing this file (sigclip_vision_384 AND newer hunyuanvideo_1.5_repackaged that bundles it as a side-file). The newer repo wins the search ranking; this entry pins the dedicated sigclip repo."
   },
 
-  "_section_animatediff_motion_modules": "AnimateDiff motion modules by guoyww - filename like 'mm_sd_v15_v2.ckpt' or 'v2_lora_ZoomIn.ckpt' contains no token that points to guoyww/animatediff so search can't find the canonical repo.",
-  "mm_sd_v14.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v14.ckpt",
-    "source": "huggingface"
+  "_section_lcm_lora": "Latent-consistency LoRAs are stored upstream as 'pytorch_lora_weights.safetensors' (the diffusers convention). Filename-based HF search returns dozens of unrelated 'mylcmlora*' / SD-1.5-LCM checkpoints with the same filename. Three official LoRA repos exist (sdv1-5, sdxl, ssd-1b) and the trusted-author probe can't disambiguate which one matches our specific filename.",
+  "lcm-lora-sdv1-5.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 134621556,
+    "aliases": [
+      "LCM_LoRA_Weights_SD15.safetensors",
+      "LCM_LoRA_SD15.safetensors",
+      "lcm_lora_sd15.safetensors",
+      "lcm_lora_weights_sd15.safetensors",
+      "lcm-lora-sd15.safetensors"
+    ],
+    "_reason": "Upstream filename is pytorch_lora_weights.safetensors. Three latent-consistency LoRA repos exist (sdv1-5, sdxl, ssd-1b); without an explicit pin we'd download the wrong one or none."
   },
-  "mm_sd_v15.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15.ckpt",
-    "source": "huggingface"
+  "lcm-lora-sdxl.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 393854592,
+    "aliases": [
+      "LCM_LoRA_Weights_SDXL.safetensors",
+      "LCM_LoRA_SDXL.safetensors",
+      "lcm_lora_sdxl.safetensors",
+      "lcm_lora_weights_sdxl.safetensors"
+    ],
+    "_reason": "Same as lcm-lora-sdv1-5 - upstream filename is pytorch_lora_weights.safetensors."
   },
-  "mm_sd_v15_v2.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15_v2.ckpt",
-    "source": "huggingface"
-  },
-  "mm_sdxl_v10_beta.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sdxl_v10_beta.ckpt",
-    "source": "huggingface"
-  },
-  "v3_sd15_mm.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_mm.ckpt",
-    "source": "huggingface"
-  },
-  "v3_sd15_adapter.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_adapter.ckpt",
-    "source": "huggingface"
-  },
-  "v3_sd15_sparsectrl_rgb.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_sparsectrl_rgb.ckpt",
-    "source": "huggingface"
-  },
-  "v3_sd15_sparsectrl_scribble.ckpt": {
-    "folder": "animatediff_models",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_sparsectrl_scribble.ckpt",
-    "source": "huggingface"
+  "lcm-lora-ssd-1b.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-ssd-1b/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "aliases": ["LCM_LoRA_SSD_1B.safetensors", "lcm_lora_ssd_1b.safetensors"],
+    "_reason": "Same as lcm-lora-sdv1-5 - upstream filename is pytorch_lora_weights.safetensors."
   },
 
-  "_section_motion_loras": "AnimateDiff camera-control motion LoRAs",
-  "v2_lora_PanLeft.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_PanLeft.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_PanRight.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_PanRight.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_ZoomIn.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_ZoomIn.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_ZoomOut.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_ZoomOut.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_TiltUp.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_TiltUp.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_TiltDown.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_TiltDown.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_RollingClockwise.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_RollingClockwise.ckpt",
-    "source": "huggingface"
-  },
-  "v2_lora_RollingAnticlockwise.ckpt": {
-    "folder": "animatediff_motion_lora",
-    "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_RollingAnticlockwise.ckpt",
-    "source": "huggingface"
-  },
-
-  "_section_civitai_lykon": "Lykon's ControlNet 1.1 pack on CivitAI - the API doesn't surface these filenames so they have to be hardcoded. NOT pattern-able: the trailing version-id (44736 etc.) is an opaque CivitAI database id with no relation to the variant name.",
+  "_section_civitai_lykon": "Lykon's ControlNet 1.1 pack on CivitAI. CivitAI's API search doesn't return results by filename - the parent model is named 'ControlNet 1.1 Models' and the variant filenames (controlnet11Models_*.safetensors) only appear in the version metadata. The numeric URL '/api/download/models/<id>' uses opaque CivitAI database IDs (44736 etc.) that have no relation to the variant name.",
   "controlnet11Models_depth.safetensors": {
     "folder": "controlnet",
     "url": "https://civitai.com/api/download/models/44736",
     "source": "civitai",
     "size": 722601034,
-    "needs_token": true
+    "needs_token": true,
+    "_reason": "CivitAI version-id is an opaque database key. There is no derivable rule mapping '_depth' -> 44736."
   },
   "controlnet11Models_openpose.safetensors": {
     "folder": "controlnet",
     "url": "https://civitai.com/api/download/models/44811",
     "source": "civitai",
     "size": 722601034,
-    "needs_token": true
+    "needs_token": true,
+    "_reason": "Same as controlnet11Models_depth - opaque CivitAI version-id."
   },
   "controlnet11Models_canny.safetensors": {
     "folder": "controlnet",
     "url": "https://civitai.com/api/download/models/44774",
     "source": "civitai",
     "size": 722601034,
-    "needs_token": true
+    "needs_token": true,
+    "_reason": "Same as controlnet11Models_depth - opaque CivitAI version-id."
   },
   "controlnet11Models_tileE.safetensors": {
     "folder": "controlnet",
     "url": "https://civitai.com/api/download/models/67566",
     "source": "civitai",
     "size": 722601034,
-    "needs_token": true
+    "needs_token": true,
+    "_reason": "Same as controlnet11Models_depth - opaque CivitAI version-id."
   }
 }
