@@ -488,6 +488,18 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
     # the filename. Repos that are clearly unrelated (e.g. all the "film"
     # name-search hits when looking for "film_net_fp16") are skipped to keep
     # the API budget for promising candidates.
+    #
+    # IMPORTANT: HF's /api/models?search= endpoint returns repos sorted by
+    # name match quality, NOT by popularity. For generic filenames like
+    # "sd_xl_base_1.0.safetensors" that means an obscure 22 MB LoRA in
+    # 'Chengbin124/sd_xl_base_2.0.safetensors' may be returned BEFORE
+    # 'stabilityai/stable-diffusion-xl-base-1.0' (the canonical 6.6 GB
+    # checkpoint with 8M+ downloads). We pre-sort the candidate list by
+    # download count here so the well-known repos are confirmed first;
+    # since we only emit the first 5 confirmed hits, this dramatically
+    # reduces the chance of returning a wrong-but-plausible top result.
+    candidates.sort(key=lambda c: -int(c.get("downloads") or 0))
+
     results: list[dict] = []
 
     # 3a. Siblings pass
