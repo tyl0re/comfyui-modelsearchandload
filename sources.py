@@ -32,6 +32,48 @@ _STOPWORDS = {
     "version", "v1", "v2", "v3", "test", "release", "merged",
 }
 
+# HuggingFace authors / orgs that publish canonical model files. Repos
+# from these accounts are heavily preferred over community mirrors when
+# the same file appears in multiple repos. The bonus is added to a
+# repo's effective download count for ranking purposes - an org with
+# 100 declared downloads from this list outranks an unknown repo with
+# 100k downloads, because we trust the canonical source more.
+_TRUSTED_HF_AUTHORS: set[str] = {
+    "stabilityai",
+    "black-forest-labs",
+    "runwayml",
+    "openai",
+    "laion",
+    "comfyanonymous",
+    "Comfy-Org",
+    "lllyasviel",
+    "h94",
+    "latent-consistency",
+    "ai-forever",
+    "Kijai",
+    "wangfuyun",
+    "guoyww",
+    "depth-anything",
+    "LiheYoung",
+    "Kim2091",
+    "google",
+    "facebook",
+    "meta-llama",
+    "mistralai",
+    "PixArt-alpha",
+    "TencentARC",
+    "InstantX",
+    "xinsir",
+    "diffusers",
+}
+
+
+def _trusted_author(repo_id: str) -> bool:
+    """True if the repo is hosted by an org we treat as canonical."""
+    if not repo_id or "/" not in repo_id:
+        return False
+    return repo_id.split("/", 1)[0] in _TRUSTED_HF_AUTHORS
+
 # In-memory cache: filename -> (timestamp, results)
 _search_cache: dict[str, tuple[float, list[dict]]] = {}
 _CACHE_TTL_S = 300  # 5 minutes
@@ -452,24 +494,32 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
         })
 
     # ----- Phase 1: repo-name search -----
+    # We hit the same query twice: once with HF's default ranking
+    # (relevance / name match) and once sorted by download count
+    # descending. The default ranking is needed because HF doesn't
+    # always return the canonical popular repo for filename-style
+    # queries, but the popularity-sorted variant catches it when it
+    # IS in the index (e.g. 'stable-diffusion-xl-base' returns
+    # stabilityai/... with 2M dls at top under sort=downloads).
     for q in _build_hf_queries(filename):
-        url = (
-            f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
-            f"&limit={limit_per_query}&full=true"
-        )
-        try:
-            data = _http_get_json(url, headers=headers, timeout=12)
-        except Exception:
-            continue
-        for repo in data:
-            add_candidate(
-                repo.get("id") or repo.get("modelId"),
-                via="search",
-                query=q,
-                siblings=repo.get("siblings"),
-                downloads=repo.get("downloads", 0),
-                gated=bool(repo.get("gated")),
+        for sort_param in ("", "&sort=downloads&direction=-1"):
+            url = (
+                f"https://huggingface.co/api/models?search={urllib.parse.quote(q)}"
+                f"&limit={limit_per_query}&full=true{sort_param}"
             )
+            try:
+                data = _http_get_json(url, headers=headers, timeout=12)
+            except Exception:
+                continue
+            for repo in data:
+                add_candidate(
+                    repo.get("id") or repo.get("modelId"),
+                    via="search",
+                    query=q,
+                    siblings=repo.get("siblings"),
+                    downloads=repo.get("downloads", 0),
+                    gated=bool(repo.get("gated")),
+                )
 
     # ----- Phase 2: full-text README search -----
     # This is what catches files like film_net_fp16 (mentioned in README of
@@ -489,16 +539,23 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
     # name-search hits when looking for "film_net_fp16") are skipped to keep
     # the API budget for promising candidates.
     #
-    # IMPORTANT: HF's /api/models?search= endpoint returns repos sorted by
-    # name match quality, NOT by popularity. For generic filenames like
-    # "sd_xl_base_1.0.safetensors" that means an obscure 22 MB LoRA in
-    # 'Chengbin124/sd_xl_base_2.0.safetensors' may be returned BEFORE
-    # 'stabilityai/stable-diffusion-xl-base-1.0' (the canonical 6.6 GB
-    # checkpoint with 8M+ downloads). We pre-sort the candidate list by
-    # download count here so the well-known repos are confirmed first;
-    # since we only emit the first 5 confirmed hits, this dramatically
+    # IMPORTANT: HF's /api/models?search= endpoint returns repos sorted
+    # by name-match quality, NOT by popularity. We pre-sort the
+    # candidate list by:
+    #   1. Trusted-author bonus (stabilityai, black-forest-labs, ...)
+    #      Repos from canonical orgs come first regardless of download
+    #      count, so the official source beats popular community mirrors.
+    #   2. Download count, descending. Highest downloads first within
+    #      the same author tier.
+    # Only the first 5 confirmed hits are emitted, so this dramatically
     # reduces the chance of returning a wrong-but-plausible top result.
-    candidates.sort(key=lambda c: -int(c.get("downloads") or 0))
+    def _candidate_priority(c):
+        repo_id = c.get("repo") or ""
+        is_trusted = 0 if _trusted_author(repo_id) else 1
+        downloads = -int(c.get("downloads") or 0)
+        return (is_trusted, downloads)
+
+    candidates.sort(key=_candidate_priority)
 
     results: list[dict] = []
 
