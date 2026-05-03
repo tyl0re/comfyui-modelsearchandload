@@ -675,6 +675,24 @@ function renderMissing(parent, missing, status) {
       textContent: `${m.folder}${m.subfolder ? "/" + m.subfolder : ""}  ·  used by ${m.node_type || "?"}`,
       style: { fontSize: "11px", opacity: "0.8" },
     });
+    // Full destination path so the user can spot wrong-folder routing
+    // before downloading. Uses the workflow's filename as the final
+    // component (the downloader preserves it even when the upstream
+    // file has a different name like 'pytorch_lora_weights.safetensors').
+    const targetEl = el("div", {
+      textContent: m.target_path
+        ? "→ " + m.target_path
+        : "→ (no target path resolved - see folder above)",
+      style: {
+        fontSize: "10px",
+        opacity: "0.7",
+        marginTop: "2px",
+        fontFamily: "ui-monospace, Consolas, Menlo, monospace",
+        wordBreak: "break-all",
+        color: m.target_path ? "var(--input-text, #aaa)" : "#ef9a9a",
+      },
+      title: "Where the file will be saved on disk. If this looks wrong, the download will land in the wrong place — please report it.",
+    });
     const btnFind = el("button", { textContent: "Find sources" });
     Object.assign(btnFind.style, {
       marginTop: "4px",
@@ -702,7 +720,7 @@ function renderMissing(parent, missing, status) {
       }
     };
 
-    row.append(name, meta, btnFind, candidatesBox);
+    row.append(name, meta, targetEl, btnFind, candidatesBox);
     parent.append(row);
   }
 }

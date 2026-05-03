@@ -615,6 +615,19 @@ def scan_workflow(workflow: dict) -> list[dict]:
             # exactly.
             if _is_locally_present(basename, value_norm, local_index, folder):
                 continue
+
+            # Compute the absolute path where the downloader will put
+            # this file. Surfacing this lets the user catch wrong-folder
+            # routing in the UI before clicking Download.
+            try:
+                target_dir = get_target_directory(folder)
+                if subfolder:
+                    parts = [p for p in subfolder.split("/") if p not in ("", ".", "..")]
+                    target_dir = os.path.join(target_dir, *parts)
+                target_path = os.path.join(target_dir, basename)
+            except Exception:
+                target_path = None
+
             found.append({
                 "name": basename,
                 "raw": value,
@@ -622,6 +635,7 @@ def scan_workflow(workflow: dict) -> list[dict]:
                 "folder": folder,
                 "node_type": node_type,
                 "field": field,
+                "target_path": target_path,
             })
 
     return found
