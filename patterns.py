@@ -294,28 +294,37 @@ _RULES: list[dict] = [
 
     # -----------------------------------------------------------------
     # Real-ESRGAN family of upscalers
+    # The 'ai-forever/Real-ESRGAN' mirror only carries x2/x4/x8 - anime
+    # and general models live elsewhere.
     # -----------------------------------------------------------------
     {
         "pattern": re.compile(r"^realesrgan[_]?x4plus[_]?anime[_]?6b\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
+        "url":    "https://huggingface.co/gemasai/RealESRGAN_x4plus_anime_6B/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
         "folder": "upscale_models",
         "size":   17938799,
         "source": "huggingface",
-        "title":  "ai-forever/Real-ESRGAN (anime 6B)",
+        "title":  "gemasai/RealESRGAN_x4plus_anime_6B",
     },
     {
-        "pattern": re.compile(r"^realesrgan[_]?x2plus\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2plus.pth",
+        "pattern": re.compile(r"^realesrgan[_]?x2(?:plus)?\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth",
         "folder": "upscale_models",
         "source": "huggingface",
         "title":  "ai-forever/Real-ESRGAN (x2)",
     },
     {
-        "pattern": re.compile(r"^realesr[_]?general[_]?x4v3\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/realesr-general-x4v3.pth",
+        "pattern": re.compile(r"^realesrgan[_]?x4(?:plus)?\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth",
         "folder": "upscale_models",
         "source": "huggingface",
-        "title":  "ai-forever/Real-ESRGAN (general x4 v3)",
+        "title":  "ai-forever/Real-ESRGAN (x4)",
+    },
+    {
+        "pattern": re.compile(r"^realesrgan[_]?x8(?:plus)?\.pth$"),
+        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x8.pth",
+        "folder": "upscale_models",
+        "source": "huggingface",
+        "title":  "ai-forever/Real-ESRGAN (x8)",
     },
 ]
 

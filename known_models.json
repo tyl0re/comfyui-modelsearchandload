@@ -67,8 +67,9 @@
   },
   "RealESRGAN_x4plus.pth": {
     "folder": "upscale_models",
-    "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus.pth",
-    "source": "huggingface"
+    "url": "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRGAN_x4plus.pth",
+    "source": "huggingface",
+    "size": 67040989
   },
 
   "_comment_civitai_lykon": "Lykon's ControlNet 1.1 pack on CivitAI - the API doesn't surface these filenames so they have to be hardcoded. Other variants follow the same numeric URL scheme (38784 model, /api/download/models/<version-id>).",

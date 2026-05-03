@@ -340,7 +340,22 @@ class DownloadManager:
                     req = self._build_request(job, resume_from=0)
                     resp = urllib.request.urlopen(req, timeout=30)
                 else:
-                    raise
+                    # Re-raise with a clearer message so the UI shows
+                    # something more helpful than "HTTP Error 404: Not
+                    # Found" without context. Common causes:
+                    #   404 = wrong URL in pattern / DB
+                    #   401/403 = HuggingFace gated repo, missing token
+                    #             or unaccepted license
+                    #   429 = rate-limited (CivitAI especially)
+                    msg = f"HTTP {e.code} {e.reason} - {job.url}"
+                    if e.code == 404:
+                        msg += " (file not found - the URL is wrong; please open an issue with the filename)"
+                    elif e.code in (401, 403):
+                        msg += " (auth required - set HF/CivitAI token in Settings, and accept the model license on the HF web UI)"
+                    elif e.code == 429:
+                        msg += " (rate limited - try again in a minute)"
+                    print(f"[ModelDownloader] download failed for '{job.filename}': {msg}")
+                    raise RuntimeError(msg) from e
 
             total_header = resp.headers.get("Content-Length")
             if total_header:
