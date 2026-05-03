@@ -619,6 +619,15 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
             # first regardless.
             "downloads": known.get("downloads", 0),
         })
+        # Short-circuit: a curated entry is hand-picked for this exact
+        # filename, so there's no need to hit HuggingFace + CivitAI in
+        # addition. Skipping those saves ~6 seconds per lookup, which
+        # compounds noticeably during "Download all" of many files.
+        if folder_hint:
+            for c in out:
+                c.setdefault("folder", folder_hint)
+        _search_cache[filename] = (time.time(), [dict(c) for c in out])
+        return out
 
     try:
         out.extend(search_huggingface(filename))

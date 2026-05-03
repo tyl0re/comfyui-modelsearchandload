@@ -148,5 +148,68 @@
     "source": "civitai",
     "size": 722601034,
     "needs_token": true
+  },
+  "LCM_LoRA_Weights_SD15.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 134621556,
+    "note": "Latent Consistency Model LoRA for SD 1.5. Upstream filename is pytorch_lora_weights.safetensors; many ComfyUI workflows reference it as LCM_LoRA_Weights_SD15.safetensors."
+  },
+  "LCM_LoRA_Weights_SDXL.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 393854592
+  },
+  "lcm-lora-sdv1-5.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 134621556
+  },
+  "lcm-lora-sdxl.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
+    "source": "huggingface",
+    "size": 393854592
+  },
+  "clip_vision-sd15.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+    "source": "huggingface",
+    "size": 2528373448,
+    "note": "CLIP-ViT-H image encoder used by IP-Adapter SD15. Stored upstream as models/image_encoder/model.safetensors; many workflows reference it as clip_vision-sd15.safetensors."
+  },
+  "clip_vision_sd15.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+    "source": "huggingface",
+    "size": 2528373448
+  },
+  "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+    "source": "huggingface",
+    "size": 2528373448
+  },
+  "clip_vision_h.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
+    "source": "huggingface",
+    "size": 856506240,
+    "note": "Used by Wan2.2 / SigCLIP workflows. Stored upstream as sigclip_vision_patch14_384.safetensors."
+  },
+  "clip_vision-sdxl.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors",
+    "source": "huggingface",
+    "size": 3689912664
+  },
+  "clip_vision_sdxl.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors",
+    "source": "huggingface",
+    "size": 3689912664
   }
 }
