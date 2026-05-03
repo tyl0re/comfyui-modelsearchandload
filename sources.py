@@ -11,6 +11,12 @@ import json as _json
 from typing import Any
 
 from .config import load_config, load_known_models
+from .patterns import (
+    filename_aliases,
+    is_upstream_alias,
+    lookup_pattern,
+    normalise_filename,
+)
 
 USER_AGENT = "ComfyUI-ModelDownloader/1.0"
 
@@ -52,20 +58,67 @@ def _hf_headers() -> dict[str, str]:
 # ---------- Known DB ----------
 
 def lookup_known(filename: str) -> dict | None:
+    """Look up `filename` in the curated DB.
+
+    Tries multiple spellings so the user is not punished for a hyphen
+    vs. underscore difference, or for case differences. The returned
+    entry preserves the user's original filename (so the file ends up
+    on disk under the exact name the workflow asked for).
+    """
     db = load_known_models()
-    if filename in db:
-        entry = dict(db[filename])
-        entry["filename"] = filename
-        entry.setdefault("title", filename)
-        return entry
-    # Case-insensitive match
-    lc = filename.lower()
+    if not db:
+        return None
+    # Build a normalised index of the DB once per call. Cheap.
+    norm_db: dict[str, tuple[str, dict]] = {}
     for k, v in db.items():
-        if k.lower() == lc:
-            entry = dict(v)
-            entry["filename"] = k
-            entry.setdefault("title", k)
+        norm_db.setdefault(normalise_filename(k), (k, v))
+
+    # Try the original spelling, then aliases (hyphen<->underscore, lower)
+    for candidate in filename_aliases(filename):
+        # Direct case-sensitive hit (cheapest)
+        if candidate in db:
+            entry = dict(db[candidate])
+            entry["filename"] = filename
+            entry.setdefault("title", candidate)
             return entry
+        # Normalised hit
+        norm = normalise_filename(candidate)
+        if norm in norm_db:
+            orig_key, raw_entry = norm_db[norm]
+            entry = dict(raw_entry)
+            entry["filename"] = filename
+            entry.setdefault("title", orig_key)
+            return entry
+    return None
+
+
+def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> dict | None:
+    """Combined lookup: curated DB first, then pattern rules.
+
+    Returns a candidate dict ready to be inserted into find_candidates'
+    output, or None if no rule matched.
+    """
+    # 1. Curated DB - hand-picked, always wins
+    known = lookup_known(filename)
+    if known:
+        return {
+            "source":   known.get("source", "known"),
+            "title":    known.get("title", filename),
+            "filename": filename,
+            "folder":   known.get("folder", folder_hint or "checkpoints"),
+            "url":      known["url"],
+            "size":     known.get("size"),
+            "gated":    known.get("gated", False),
+            "preferred": True,
+            "downloads": known.get("downloads", 0),
+            "_via":     "known",
+        }
+    # 2. Pattern rules - generic, covers families of filenames
+    pat = lookup_pattern(filename)
+    if pat:
+        if folder_hint and not pat.get("folder"):
+            pat["folder"] = folder_hint
+        return pat
     return None
 
 
@@ -234,14 +287,16 @@ def _hf_check_fallback_repos(filename: str) -> list[tuple[str, str, int | None]]
 
     Returns a list of (repo_id, file_path, file_size). Cheap because each
     relevant repo only needs a single tree-API call, and we filter by hint
-    tokens before doing even that.
+    tokens before doing even that. Upstream-alias matching is enabled
+    because we know the repo is canonically the right place for this
+    type of model.
     """
     fn_lc = filename.lower()
     found: list[tuple[str, str, int | None]] = []
     for repo_id, hints in _HF_FALLBACK_REPOS:
         if hints and not any(h in fn_lc for h in hints):
             continue
-        hit = _hf_find_file_in_repo(repo_id, filename)
+        hit = _hf_find_file_in_repo(repo_id, filename, accept_upstream_alias=True)
         if hit:
             found.append((repo_id, hit["path"], hit.get("size")))
     return found
@@ -258,20 +313,71 @@ def _hf_list_repo_files(repo_id: str) -> list[dict]:
         return []
 
 
-def _hf_find_file_in_repo(repo_id: str, filename: str) -> dict | None:
-    """Look for a file matching `filename` (basename) inside a HF repo's tree."""
-    target = filename.lower()
+def _hf_find_file_in_repo(
+    repo_id: str,
+    filename: str,
+    accept_upstream_alias: bool = False,
+) -> dict | None:
+    """Look for a file matching `filename` (basename) inside a HF repo's tree.
+
+    Two passes:
+
+      1. Strict pass: look for an exact filename match (case-insensitive,
+         normalised so hyphens and underscores are interchangeable).
+      2. Optional alias pass: if `accept_upstream_alias` is True and the
+         strict pass found nothing, accept any of the well-known
+         "single weights file" filenames (model.safetensors,
+         pytorch_lora_weights.safetensors, ...) as the answer. This is
+         what lets us resolve workflow names like
+         ``LCM_LoRA_Weights_SD15.safetensors`` to a HF repo whose only
+         file is ``pytorch_lora_weights.safetensors``.
+
+    The returned dict's ``path`` is the path inside the repo, ``size``
+    the byte count, and ``alias`` is True iff we matched via the alias
+    pass. Callers can use ``alias`` to decide whether to rename the
+    file on download.
+    """
+    norm_target = normalise_filename(filename)
     files = _hf_list_repo_files(repo_id)
+
+    # Strict pass
     for f in files:
         path = (f.get("path") or "").replace("\\", "/")
         if not path:
             continue
         bn = path.rsplit("/", 1)[-1]
-        if bn.lower() == target or path.lower() == target:
+        if normalise_filename(bn) == norm_target or path.lower() == filename.lower():
             return {
                 "path": path,
                 "size": f.get("size"),
+                "alias": False,
             }
+
+    # Alias pass - only if the caller opted in. We require that the
+    # repo contains EXACTLY ONE matching alias file at the top level (or
+    # in the conventional `models/`-like subdir) so we don't pick the
+    # wrong one when a repo bundles many.
+    if accept_upstream_alias:
+        candidates = []
+        for f in files:
+            path = (f.get("path") or "").replace("\\", "/")
+            if not path:
+                continue
+            bn = path.rsplit("/", 1)[-1]
+            if is_upstream_alias(bn):
+                # Prefer top-level files (no slashes in path)
+                depth = path.count("/")
+                candidates.append((depth, path, f.get("size")))
+        if candidates:
+            # Pick the shallowest-depth candidate; ties broken by path.
+            candidates.sort(key=lambda x: (x[0], x[1]))
+            _, path, size = candidates[0]
+            return {
+                "path": path,
+                "size": size,
+                "alias": True,
+            }
+
     return None
 
 
@@ -403,9 +509,22 @@ def search_huggingface(filename: str, limit_per_query: int = 20) -> list[dict]:
         if tree_priority(c) >= 2:
             continue  # not worth trying
         tree_lookups_done += 1
-        hit = _hf_find_file_in_repo(c["repo"], filename)
+        # Allow upstream-alias matching only for full-text hits. A
+        # full-text hit means the README mentions our filename - very
+        # high signal that this repo IS the right one - so if its
+        # actual weights file has a generic name like
+        # "pytorch_lora_weights.safetensors" we accept that as the
+        # answer and rename on download.
+        accept_alias = (c["via"] == "fulltext")
+        hit = _hf_find_file_in_repo(c["repo"], filename, accept_upstream_alias=accept_alias)
         if hit:
             confirmed.append((c, hit["path"], hit.get("size")))
+            if hit.get("alias"):
+                # Tag the candidate so callers know the repo file has a
+                # different name than the workflow asked for. The download
+                # path should still be the workflow's filename - the user's
+                # workflow is the source of truth for naming.
+                c["_alias_match"] = True
 
     # ----- Phase 4: well-known fallback repos -----
     # If neither repo-search nor README-fulltext found the file, probe a
@@ -602,27 +721,14 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
         return out
 
     out: list[dict] = []
-    known = lookup_known(filename)
-    if known:
-        out.append({
-            "source": known.get("source", "known"),
-            "title": known.get("title", filename),
-            "filename": filename,
-            "folder": known.get("folder", folder_hint or "checkpoints"),
-            "url": known["url"],
-            "size": known.get("size"),
-            "gated": known.get("gated", False),
-            "preferred": True,
-            # Curated entries don't have a real download count, but we want
-            # them on top so we stamp a very high synthetic value used only
-            # for sort ordering. The 'preferred' flag already pins them
-            # first regardless.
-            "downloads": known.get("downloads", 0),
-        })
-        # Short-circuit: a curated entry is hand-picked for this exact
-        # filename, so there's no need to hit HuggingFace + CivitAI in
-        # addition. Skipping those saves ~6 seconds per lookup, which
-        # compounds noticeably during "Download all" of many files.
+    pinned = lookup_known_or_pattern(filename, folder_hint)
+    if pinned:
+        out.append(pinned)
+        # Short-circuit: a curated DB entry or pattern-rule hit is
+        # hand-picked / generated for this exact filename, so there's
+        # no need to hit HuggingFace + CivitAI in addition. Skipping
+        # those saves ~6 seconds per lookup, which compounds noticeably
+        # during "Download all" of many files.
         if folder_hint:
             for c in out:
                 c.setdefault("folder", folder_hint)
