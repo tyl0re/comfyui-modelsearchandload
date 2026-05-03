@@ -562,8 +562,36 @@ def search_civitai(filename: str, limit: int = 5) -> list[dict]:
 
 # ---------- Combined ----------
 
+def _candidate_sort_key(c: dict) -> tuple:
+    """Sort key for the merged candidate list. Lower tuple sorts first.
+
+    Order of precedence:
+      1. Curated DB entries (`preferred=True`) always come first - they're
+         hand-picked for the file in question.
+      2. By download count, descending. The official Wan2.2 LoRA repo with
+         1.2M downloads outranks a random fork with 0 downloads.
+      3. HuggingFace before CivitAI when downloads tie - HF is more
+         reliably accessible (no token usually needed).
+      4. Stable: by title for deterministic ordering when everything else
+         is equal.
+    """
+    preferred = 0 if c.get("preferred") else 1
+    # Negative because Python sorts ascending; we want highest downloads first.
+    downloads = -int(c.get("downloads") or 0)
+    src = c.get("source", "")
+    src_rank = {"known": 0, "huggingface": 1, "civitai": 2}.get(src, 3)
+    title = (c.get("title") or "").lower()
+    return (preferred, downloads, src_rank, title)
+
+
 def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]:
-    """Return ranked download candidates for a filename, with caching."""
+    """Return ranked download candidates for a filename, with caching.
+
+    The returned list is sorted with the most-likely-correct entries
+    first: hand-curated database entries, then real candidates ranked by
+    download count (popularity), with HuggingFace ranking above CivitAI
+    when downloads tie.
+    """
     # Cache lookup
     cached = _search_cache.get(filename)
     if cached and (time.time() - cached[0]) < _CACHE_TTL_S:
@@ -585,6 +613,11 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
             "size": known.get("size"),
             "gated": known.get("gated", False),
             "preferred": True,
+            # Curated entries don't have a real download count, but we want
+            # them on top so we stamp a very high synthetic value used only
+            # for sort ordering. The 'preferred' flag already pins them
+            # first regardless.
+            "downloads": known.get("downloads", 0),
         })
 
     try:
@@ -599,6 +632,9 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
     if folder_hint:
         for c in out:
             c.setdefault("folder", folder_hint)
+
+    # Final ranking across all sources combined.
+    out.sort(key=_candidate_sort_key)
 
     _search_cache[filename] = (time.time(), [dict(c) for c in out])
     return out

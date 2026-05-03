@@ -148,33 +148,48 @@ class DownloadManager:
             sub = "/".join(parts)
         dest_dir = os.path.join(base_dir, *sub.split("/")) if sub else base_dir
 
-        # Duplicate-detection: if there is already an ACTIVE job downloading
-        # the exact same filename to the exact same destination directory,
-        # return the existing job instead of starting a second one. This
-        # prevents the user (or a workflow that references the same model
-        # from multiple nodes) from blasting the same URL twice.
+        # Duplicate-detection: if there is already an ACTIVE job for this
+        # filename, return it instead of starting a second download. We
+        # match three ways - any one of them is enough:
+        #   a) same filename + same destination directory (the strict case)
+        #   b) same filename + same final on-disk path (catches calls with
+        #      slightly different dest_dir spellings)
+        #   c) same filename anywhere on disk while ACTIVE (the lenient
+        #      case - same model name, even if a workflow asked for a
+        #      different subfolder; downloading the same MB twice helps
+        #      nobody)
         # Finished/error/cancelled jobs are NOT considered active so the
-        # user can retry after a failure.
+        # user can retry after a failure by clicking again.
         active_states = ("queued", "connecting", "linking", "downloading")
+        target_path = os.path.normcase(os.path.abspath(os.path.join(dest_dir, filename)))
+        target_dir_n = os.path.normcase(os.path.abspath(dest_dir))
         with self._lock:
             for existing in self._jobs.values():
                 if existing.status not in active_states:
                     continue
-                if existing.filename != filename:
+                # Filename comparison is case-insensitive on Windows
+                # (NTFS is case-preserving but not case-sensitive) and
+                # exact on Linux. We match on the filename even with
+                # different cases on Windows because that's how ComfyUI
+                # itself behaves.
+                if os.path.normcase(existing.filename) != os.path.normcase(filename):
                     continue
-                # Compare normalized destination dirs (case-insensitive on
-                # Windows, case-sensitive on Linux) so we don't trip over
-                # trailing separators or path-style differences.
-                try:
-                    same = os.path.normcase(os.path.abspath(existing.dest_dir)) \
-                        == os.path.normcase(os.path.abspath(dest_dir))
-                except Exception:
-                    same = existing.dest_dir == dest_dir
-                if same:
-                    # Mark the returned job so the caller can tell the user
-                    # this wasn't a fresh enqueue.
+                ex_dir_n = os.path.normcase(os.path.abspath(existing.dest_dir))
+                ex_path_n = os.path.normcase(os.path.abspath(existing.dest_path))
+                if ex_dir_n == target_dir_n or ex_path_n == target_path:
+                    print(f"[ModelDownloader] dedupe: '{filename}' already in flight "
+                          f"(job {existing.id}, status={existing.status}); "
+                          f"returning existing job instead of starting a new one")
                     existing._is_duplicate_of_active = True
                     return existing
+                # Same filename, different folder — also a duplicate. The
+                # second request usually comes from a different node in the
+                # same workflow asking for the same model.
+                print(f"[ModelDownloader] dedupe: '{filename}' is already being "
+                      f"downloaded to {existing.dest_dir!r}; refusing to start a "
+                      f"second copy at {dest_dir!r}")
+                existing._is_duplicate_of_active = True
+                return existing
 
         os.makedirs(dest_dir, exist_ok=True)
         job = DownloadJob(
