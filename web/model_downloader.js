@@ -511,6 +511,49 @@ function annotateMissingFromBulk(parent, results) {
   });
 }
 
+// Set of (name, jobId) pairs that have already been scheduled for
+// auto-removal. Prevents the same row from queueing multiple removal
+// timers if 'done' is observed across several poll ticks.
+const _missingRowRemovalScheduled = new Set();
+
+function _scheduleMissingRowRemoval(row, parent, name, lastMissing, badgeLabel, badgeColor) {
+  const key = name;
+  if (_missingRowRemovalScheduled.has(key)) return;
+  _missingRowRemovalScheduled.add(key);
+
+  const badge = _ensureBadge(row);
+  _setBadge(badge, badgeLabel, badgeColor);
+
+  setTimeout(() => {
+    row.style.transition = "opacity 0.4s, max-height 0.4s, padding 0.4s, margin 0.4s";
+    row.style.overflow = "hidden";
+    row.style.maxHeight = row.offsetHeight + "px";
+    requestAnimationFrame(() => {
+      row.style.opacity = "0";
+      row.style.maxHeight = "0";
+      row.style.padding = "0";
+      row.style.margin = "0";
+      row.style.border = "0";
+    });
+    setTimeout(() => {
+      row.remove();
+      if (Array.isArray(lastMissing)) {
+        const idx = lastMissing.findIndex(m => m.name === name);
+        if (idx >= 0) lastMissing.splice(idx, 1);
+      }
+      _missingRowRemovalScheduled.delete(key);
+      if (parent.children.length === 0) {
+        const ph = document.createElement("div");
+        ph.textContent = "All downloads complete.";
+        Object.assign(ph.style, {
+          opacity: "0.7", fontStyle: "italic", padding: "4px 0",
+        });
+        parent.appendChild(ph);
+      }
+    }, 450);
+  }, 1200);
+}
+
 // Called every poll-tick. Looks at the current jobs list and updates the
 // status badge of each missing-row that has an associated download job.
 // Rows whose download completed are removed entirely after a short delay.
@@ -527,7 +570,22 @@ function syncMissingBadges(parent, nameToJobId, jobs, lastMissing) {
     }
     const job = jobById.get(jobId);
     if (!job) {
-      // Job was cleared with "Clear finished" - leave the row as-is
+      // Job vanished from the manager - this happens when:
+      //   a) the user clicked "Clear finished" while a download was in
+      //      progress, or
+      //   b) the job finished + was cleaned up before our poll caught it
+      //      in the 'done' state (very fast / linked downloads).
+      // Either way: if the file is now ACTUALLY on disk, treat as done
+      // and remove the row. We approximate "on disk" by trusting that
+      // the registered job ran to completion. The file-system index is
+      // refreshed only on the next /scan, so we don't try to verify it
+      // here client-side; we just remove the row optimistically.
+      console.log(`[ModelDownloader] job ${jobId} for '${name}' vanished - assuming done, removing row`);
+      _scheduleMissingRowRemoval(
+        row, parent, name, lastMissing,
+        "✓ Done - removing from list...", "#66bb6a",
+      );
+      nameToJobId.delete(name);
       continue;
     }
     const badge = _ensureBadge(row);
@@ -545,35 +603,10 @@ function syncMissingBadges(parent, nameToJobId, jobs, lastMissing) {
                     : m === "symlink"  ? "Symlinked"
                     : m === "already-linked" ? "Already linked"
                     : "Linked";
-        _setBadge(badge, `✓ ${label} (no download) - removing from list...`, "#66bb6a");
-        // Same auto-remove animation as "done"
-        setTimeout(() => {
-          row.style.transition = "opacity 0.4s, max-height 0.4s, padding 0.4s, margin 0.4s";
-          row.style.overflow = "hidden";
-          row.style.maxHeight = row.offsetHeight + "px";
-          requestAnimationFrame(() => {
-            row.style.opacity = "0";
-            row.style.maxHeight = "0";
-            row.style.padding = "0";
-            row.style.margin = "0";
-            row.style.border = "0";
-          });
-          setTimeout(() => {
-            row.remove();
-            if (Array.isArray(lastMissing)) {
-              const idx = lastMissing.findIndex(m => m.name === name);
-              if (idx >= 0) lastMissing.splice(idx, 1);
-            }
-            if (parent.children.length === 0) {
-              const ph = document.createElement("div");
-              ph.textContent = "All downloads complete.";
-              Object.assign(ph.style, {
-                opacity: "0.7", fontStyle: "italic", padding: "4px 0",
-              });
-              parent.appendChild(ph);
-            }
-          }, 450);
-        }, 1200);
+        _scheduleMissingRowRemoval(
+          row, parent, name, lastMissing,
+          `✓ ${label} (no download) - removing from list...`, "#66bb6a",
+        );
         nameToJobId.delete(name);
         break;
       }
@@ -590,38 +623,10 @@ function syncMissingBadges(parent, nameToJobId, jobs, lastMissing) {
         break;
       }
       case "done":
-        _setBadge(badge, "✓ Downloaded - removing from list...", "#66bb6a");
-        // Auto-remove the row after a short pause so the user sees the success
-        setTimeout(() => {
-          row.style.transition = "opacity 0.4s, max-height 0.4s, padding 0.4s, margin 0.4s";
-          row.style.overflow = "hidden";
-          row.style.maxHeight = row.offsetHeight + "px";
-          requestAnimationFrame(() => {
-            row.style.opacity = "0";
-            row.style.maxHeight = "0";
-            row.style.padding = "0";
-            row.style.margin = "0";
-            row.style.border = "0";
-          });
-          setTimeout(() => {
-            row.remove();
-            // Drop from the lastMissing list too so a re-Download-All
-            // doesn't try to re-fetch this file
-            if (Array.isArray(lastMissing)) {
-              const idx = lastMissing.findIndex(m => m.name === name);
-              if (idx >= 0) lastMissing.splice(idx, 1);
-            }
-            // Show placeholder if list is now empty
-            if (parent.children.length === 0) {
-              const ph = document.createElement("div");
-              ph.textContent = "All downloads complete.";
-              Object.assign(ph.style, {
-                opacity: "0.7", fontStyle: "italic", padding: "4px 0",
-              });
-              parent.appendChild(ph);
-            }
-          }, 450);
-        }, 1200);
+        _scheduleMissingRowRemoval(
+          row, parent, name, lastMissing,
+          "✓ Downloaded - removing from list...", "#66bb6a",
+        );
         nameToJobId.delete(name);
         break;
       case "error":
