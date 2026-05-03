@@ -490,6 +490,69 @@ function _setBadge(badge, text, color, withSpinner = false) {
   badge.style.color = color;
 }
 
+// Show a small icon next to the filename indicating that the row was
+// satisfied by linking instead of a real download. Hover-tooltip shows
+// the original file the link points at.
+//
+// `mode` one of:
+//   "hardlink"        -> 🔗  green
+//   "symlink"         -> ⇲  green
+//   "already-linked"  -> 🔗  blue (was already at the right path)
+//   "linking"         -> 🔗  orange (in progress)
+//   "remove" / null   -> removes the icon
+//
+// Looks up the filename header in two ways:
+//   1. an explicit element marked with [data-md-name-el="1"] (preferred)
+//   2. fallback: the first direct child <div> of the row
+function _setLinkIcon(row, mode, sourcePath) {
+  if (!row) return;
+  let header = row.querySelector("[data-md-name-el]");
+  if (!header) header = row.querySelector(":scope > div");
+  if (!header) return;
+
+  let icon = header.querySelector(".md-link-icon");
+  if (!mode || mode === "remove") {
+    if (icon) icon.remove();
+    return;
+  }
+  if (!icon) {
+    icon = document.createElement("span");
+    icon.className = "md-link-icon";
+    Object.assign(icon.style, {
+      display: "inline-block",
+      marginLeft: "6px",
+      fontSize: "13px",
+      verticalAlign: "middle",
+      cursor: "help",
+      // Reset bold from the parent so the icon reads as a glyph.
+      fontWeight: "normal",
+    });
+    header.appendChild(icon);
+  }
+  let glyph = "🔗";
+  let color = "#66bb6a";
+  let label = "linked";
+  switch (mode) {
+    case "hardlink":
+      glyph = "🔗"; color = "#66bb6a"; label = "hardlinked";
+      break;
+    case "symlink":
+      glyph = "⇲"; color = "#66bb6a"; label = "symlinked";
+      break;
+    case "already-linked":
+      glyph = "🔗"; color = "#64b5f6"; label = "already linked at correct path";
+      break;
+    case "linking":
+      glyph = "🔗"; color = "#ffb74d"; label = "linking...";
+      break;
+  }
+  icon.textContent = glyph;
+  icon.style.color = color;
+  icon.title = sourcePath
+    ? `${label}\nfrom: ${sourcePath}`
+    : label;
+}
+
 // Called once right after the bulk-download POST returns. Sets the initial
 // "Queued / no source / error" badge for each missing-row.
 function annotateMissingFromBulk(parent, results) {
@@ -596,6 +659,7 @@ function syncMissingBadges(parent, nameToJobId, jobs, lastMissing) {
         break;
       case "linking":
         _setBadge(badge, "Linking existing copy...", "#ffb74d", true);
+        _setLinkIcon(row, "linking", null);
         break;
       case "linked": {
         const m = job.link_method || "linked";
@@ -603,6 +667,7 @@ function syncMissingBadges(parent, nameToJobId, jobs, lastMissing) {
                     : m === "symlink"  ? "Symlinked"
                     : m === "already-linked" ? "Already linked"
                     : "Linked";
+        _setLinkIcon(row, m, job.link_source);
         _scheduleMissingRowRemoval(
           row, parent, name, lastMissing,
           `✓ ${label} (no download) - removing from list...`, "#66bb6a",
@@ -671,6 +736,7 @@ function renderMissing(parent, missing, status) {
       textContent: m.name,
       style: { fontWeight: "bold", wordBreak: "break-all" },
     });
+    name.setAttribute("data-md-name-el", "1");
     const meta = el("div", {
       textContent: `${m.folder}${m.subfolder ? "/" + m.subfolder : ""}  ·  used by ${m.node_type || "?"}`,
       style: { fontSize: "11px", opacity: "0.8" },
@@ -999,6 +1065,7 @@ function createJobRow(j) {
     textContent: j.filename,
     style: { fontWeight: "bold", wordBreak: "break-all" },
   });
+  name.setAttribute("data-md-name-el", "1");
 
   const bar = el("div", {
     style: {
@@ -1116,6 +1183,15 @@ function updateJobRow(entry, j) {
 
   els.statusEl.textContent = statusLabel(j.status, j);
   els.statusEl.style.color = statusColor(j.status);
+
+  // Show / hide the link-icon next to the filename in the job row,
+  // mirroring the behaviour in the missing-list above. Linking jobs
+  // get a 🔗 (or ⇲ for symlink) so the user can tell at a glance which
+  // entries used disk-space-saving and which did a real download.
+  _setLinkIcon(entry.row, j.status === "linking" ? "linking"
+                          : j.status === "linked"  ? (j.link_method || "linked")
+                          : "remove",
+               j.link_source || null);
 
   // Bar look: striped indeterminate while connecting (no total yet),
   // solid blue during transfer, green on done/linked, red on error.
