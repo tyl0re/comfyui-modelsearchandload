@@ -60,34 +60,53 @@ def _hf_headers() -> dict[str, str]:
 def lookup_known(filename: str) -> dict | None:
     """Look up `filename` in the curated DB.
 
-    Tries multiple spellings so the user is not punished for a hyphen
-    vs. underscore difference, or for case differences. The returned
-    entry preserves the user's original filename (so the file ends up
-    on disk under the exact name the workflow asked for).
+    Match priority (first hit wins):
+      1. Exact case-sensitive match against an entry's primary key
+      2. Exact case-sensitive match against an entry's 'aliases' list
+      3. Normalised match (lower-cased, hyphen<->underscore equivalent)
+         against either the primary key or any alias
+
+    Underscore _section_/_comment_ keys are skipped automatically.
+
+    The returned entry's "filename" field is set to the user's exact
+    spelling so the file ends up on disk under the workflow's name -
+    not the canonical key from the DB.
     """
     db = load_known_models()
     if not db:
         return None
-    # Build a normalised index of the DB once per call. Cheap.
-    norm_db: dict[str, tuple[str, dict]] = {}
-    for k, v in db.items():
-        norm_db.setdefault(normalise_filename(k), (k, v))
 
-    # Try the original spelling, then aliases (hyphen<->underscore, lower)
+    # Build two indexes: case-sensitive and normalised. Each maps the
+    # match-key to (primary_key, raw_entry). Skip metadata keys.
+    cs_index: dict[str, tuple[str, dict]] = {}
+    norm_index: dict[str, tuple[str, dict]] = {}
+    for k, v in db.items():
+        if not isinstance(v, dict) or k.startswith("_"):
+            continue
+        cs_index.setdefault(k, (k, v))
+        norm_index.setdefault(normalise_filename(k), (k, v))
+        for alias in v.get("aliases") or []:
+            cs_index.setdefault(alias, (k, v))
+            norm_index.setdefault(normalise_filename(alias), (k, v))
+
+    # Pass 1: case-sensitive
+    if filename in cs_index:
+        primary, raw = cs_index[filename]
+        entry = dict(raw)
+        entry.pop("aliases", None)
+        entry["filename"] = filename
+        entry.setdefault("title", primary)
+        return entry
+
+    # Pass 2: normalised (handles case + hyphen/underscore)
     for candidate in filename_aliases(filename):
-        # Direct case-sensitive hit (cheapest)
-        if candidate in db:
-            entry = dict(db[candidate])
-            entry["filename"] = filename
-            entry.setdefault("title", candidate)
-            return entry
-        # Normalised hit
         norm = normalise_filename(candidate)
-        if norm in norm_db:
-            orig_key, raw_entry = norm_db[norm]
-            entry = dict(raw_entry)
+        if norm in norm_index:
+            primary, raw = norm_index[norm]
+            entry = dict(raw)
+            entry.pop("aliases", None)
             entry["filename"] = filename
-            entry.setdefault("title", orig_key)
+            entry.setdefault("title", primary)
             return entry
     return None
 

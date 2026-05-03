@@ -103,114 +103,13 @@ def filename_aliases(name: str) -> list[str]:
 
 _RULES: list[dict] = [
     # -----------------------------------------------------------------
-    # LCM LoRAs - latent-consistency Org on HuggingFace
+    # ControlNet v1.1 (lllyasviel) - one rule covers ALL task variants
     # -----------------------------------------------------------------
-    {
-        "pattern": re.compile(
-            r"^(?:lcm[_]?lora[_]?weights[_]?sd[_]?1?[_.]?5"
-            r"|lcm[_]?lora[_]?sdv?1?[_.]?5"
-            r"|lcm[_]?lora[_]?sd15)\.safetensors$"
-        ),
-        "url":    "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
-        "folder": "loras",
-        "size":   134621556,
-        "source": "huggingface",
-        "title":  "latent-consistency/lcm-lora-sdv1-5",
-    },
-    {
-        "pattern": re.compile(
-            r"^(?:lcm[_]?lora[_]?weights[_]?sdxl"
-            r"|lcm[_]?lora[_]?sdxl)\.safetensors$"
-        ),
-        "url":    "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
-        "folder": "loras",
-        "size":   393854592,
-        "source": "huggingface",
-        "title":  "latent-consistency/lcm-lora-sdxl",
-    },
-    {
-        "pattern": re.compile(r"^lcm[_]?lora[_]?ssd[_]?1b\.safetensors$"),
-        "url":    "https://huggingface.co/latent-consistency/lcm-lora-ssd-1b/resolve/main/pytorch_lora_weights.safetensors",
-        "folder": "loras",
-        "source": "huggingface",
-        "title":  "latent-consistency/lcm-lora-ssd-1b",
-    },
-
-    # -----------------------------------------------------------------
-    # CLIP Vision encoders used by IP-Adapter
-    # -----------------------------------------------------------------
-    {
-        # SD15 image encoder (CLIP-ViT-H, 2.4 GB) - many alias names
-        "pattern": re.compile(
-            r"^(?:clip[_]?vision[_]?sd1?[_.]?5"
-            r"|ip[_]?adapter[_]?image[_]?encoder[_]?sd15"
-            r"|clip[_]?vit[_]?h[_]?14[_]?laion2b.*"
-            r"|image[_]?encoder[_]?sd15)\.safetensors$"
-        ),
-        "url":    "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
-        "folder": "clip_vision",
-        "size":   2528373448,
-        "source": "huggingface",
-        "title":  "h94/IP-Adapter (image_encoder, CLIP-ViT-H for SD1.5 IP-Adapter)",
-    },
-    {
-        # SDXL image encoder (3.5 GB)
-        "pattern": re.compile(
-            r"^(?:clip[_]?vision[_]?sdxl"
-            r"|ip[_]?adapter[_]?image[_]?encoder[_]?sdxl"
-            r"|image[_]?encoder[_]?sdxl)\.safetensors$"
-        ),
-        "url":    "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors",
-        "folder": "clip_vision",
-        "size":   3689912664,
-        "source": "huggingface",
-        "title":  "h94/IP-Adapter (sdxl_models/image_encoder)",
-    },
-    {
-        # Wan2.2 / SigCLIP H model, often referenced as clip_vision_h.safetensors
-        "pattern": re.compile(r"^(?:sigclip[_]?vision[_]?(?:patch14[_]?)?384"
-                               r"|clip[_]?vision[_]?h)\.safetensors$"),
-        "url":    "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
-        "folder": "clip_vision",
-        "size":   856506240,
-        "source": "huggingface",
-        "title":  "Comfy-Org/sigclip_vision_384",
-    },
-    {
-        # CLIP-G for SDXL refiner / StableCascade
-        "pattern": re.compile(r"^clip[_]?vision[_]?g\.safetensors$"),
-        "url":    "https://huggingface.co/comfyanonymous/clip_vision_g/resolve/main/clip_vision_g.safetensors",
-        "folder": "clip_vision",
-        "size":   3689912664,
-        "source": "huggingface",
-        "title":  "comfyanonymous/clip_vision_g",
-    },
-
-    # -----------------------------------------------------------------
-    # Depth-Anything family (custom_nodes/comfyui_controlnet_aux/ckpts/)
-    # -----------------------------------------------------------------
-    # V1 - LiheYoung/depth_anything_<size>14 stored as pytorch_model.bin
-    {
-        "pattern": re.compile(r"^depth[_]?anything[_]?(vitl|vitb|vits)14\.(?:pth|bin|safetensors)$"),
-        "url":    "https://huggingface.co/LiheYoung/depth_anything_\\g<1>14/resolve/main/pytorch_model.bin",
-        "folder": "controlnet_aux",
-        "source": "huggingface",
-        "title":  "LiheYoung/depth_anything_\\g<1>14",
-    },
-    # V2 - depth-anything/Depth-Anything-V2-{Large,Base,Small}, file already named .pth
-    {
-        "pattern": re.compile(r"^depth[_]?anything[_]?v2[_]?(vitl|vitb|vits)\.pth$"),
-        "url":    "https://huggingface.co/depth-anything/Depth-Anything-V2-{SIZE}/resolve/main/depth_anything_v2_\\g<1>.pth",
-        "folder": "controlnet_aux",
-        "source": "huggingface",
-        "title":  "depth-anything/Depth-Anything-V2-\\g<1>",
-        # SIZE depends on the captured short name; resolved at render time:
-        "_size_map": {"vitl": "Large", "vitb": "Base", "vits": "Small"},
-    },
-
-    # -----------------------------------------------------------------
-    # ControlNet v1.1 (lllyasviel) - canonical SD15 controlnet pack
-    # -----------------------------------------------------------------
+    # The repo holds 14+ controlnets named control_v11p_sd15_<task>.pth
+    # (canny, openpose, depth, normalbae, lineart, mlsd, scribble, seg,
+    # tile, inpaint, ip2p, softedge, shuffle, ...). Captured group is
+    # substituted into the URL so a brand-new task name we have never
+    # seen will resolve correctly the day it lands in the repo.
     {
         "pattern": re.compile(r"^control[_]?v11(?:[fp][1ep]?)?p?[_]?sd15[_]?(\w+)\.(?:pth|safetensors)$"),
         "url":    "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_\\g<1>.pth",
@@ -220,111 +119,32 @@ _RULES: list[dict] = [
     },
 
     # -----------------------------------------------------------------
-    # AnimateLCM by wangfuyun - canonical T2V motion module + LoRA
+    # Depth-Anything V1 - one rule covers vitl / vitb / vits
     # -----------------------------------------------------------------
+    # LiheYoung/depth_anything_<size>14 - the actual file at HF is
+    # 'pytorch_model.bin' but workflows reference it as
+    # 'depth_anything_<size>14.pth'. The download manager preserves the
+    # workflow's filename on disk via the upstream-alias mechanism.
     {
-        "pattern": re.compile(r"^animatelcm[_]?sd15[_]?t2v\.ckpt$"),
-        "url":    "https://huggingface.co/wangfuyun/AnimateLCM/resolve/main/AnimateLCM_sd15_t2v.ckpt",
-        "folder": "animatediff_models",
-        "size":   1813021123,
+        "pattern": re.compile(r"^depth[_]?anything[_]?(vitl|vitb|vits)14\.(?:pth|bin|safetensors)$"),
+        "url":    "https://huggingface.co/LiheYoung/depth_anything_\\g<1>14/resolve/main/pytorch_model.bin",
+        "folder": "controlnet_aux",
         "source": "huggingface",
-        "title":  "wangfuyun/AnimateLCM (T2V motion module)",
-    },
-    {
-        "pattern": re.compile(r"^animatelcm[_]?sd15[_]?t2v[_]?lora\.safetensors$"),
-        "url":    "https://huggingface.co/wangfuyun/AnimateLCM/resolve/main/AnimateLCM_sd15_t2v_lora.safetensors",
-        "folder": "loras",
-        "size":   134579344,
-        "source": "huggingface",
-        "title":  "wangfuyun/AnimateLCM (T2V LoRA)",
-    },
-    {
-        "pattern": re.compile(r"^animatelcm[_]?i2v\.ckpt$"),
-        "url":    "https://huggingface.co/wangfuyun/AnimateLCM-I2V/resolve/main/AnimateLCM_sd15_i2v.ckpt",
-        "folder": "animatediff_models",
-        "source": "huggingface",
-        "title":  "wangfuyun/AnimateLCM-I2V",
+        "title":  "LiheYoung/depth_anything_\\g<1>14",
     },
 
     # -----------------------------------------------------------------
-    # AnimateDiff motion modules (guoyww/animatediff)
-    # mm_sd_v14, mm_sd_v15, mm_sd_v15_v2, v3_sd15_mm, mm_sdxl_v10_beta
+    # Depth-Anything V2 - one rule covers vitl / vitb / vits
     # -----------------------------------------------------------------
+    # Three repos with capitalised size words. _size_map expands the
+    # captured short name into Large/Base/Small for the repo path.
     {
-        "pattern": re.compile(r"^mm[_]?sd[_]?(v14|v15|v15_v2)\.ckpt$"),
-        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_\\g<1>.ckpt",
-        "folder": "animatediff_models",
+        "pattern": re.compile(r"^depth[_]?anything[_]?v2[_]?(vitl|vitb|vits)\.pth$"),
+        "url":    "https://huggingface.co/depth-anything/Depth-Anything-V2-{SIZE}/resolve/main/depth_anything_v2_\\g<1>.pth",
+        "folder": "controlnet_aux",
         "source": "huggingface",
-        "title":  "guoyww/animatediff mm_sd_\\g<1>",
-    },
-    {
-        "pattern": re.compile(r"^mm[_]?sdxl[_]?v10[_]?beta\.ckpt$"),
-        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sdxl_v10_beta.ckpt",
-        "folder": "animatediff_models",
-        "source": "huggingface",
-        "title":  "guoyww/animatediff SDXL v1.0 beta",
-    },
-    {
-        "pattern": re.compile(r"^v3[_]?sd15[_]?(mm|adapter|sparsectrl_rgb|sparsectrl_scribble)\.ckpt$"),
-        "url":    "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_\\g<1>.ckpt",
-        "folder": "animatediff_models",
-        "source": "huggingface",
-        "title":  "guoyww/animatediff v3_sd15_\\g<1>",
-    },
-    # Motion LoRAs (camera control): v2_lora_PanLeft.ckpt, etc. We list
-    # them explicitly so the case-sensitive part of the filename
-    # (PanLeft, ZoomIn, ...) maps to the exact case HuggingFace expects -
-    # capture-group backrefs would always be lower-cased by our
-    # normaliser before matching.
-    *[
-        {
-            "pattern": re.compile(rf"^v2[_]?lora[_]?{name.lower()}\.ckpt$"),
-            "url":    f"https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_{name}.ckpt",
-            "folder": "animatediff_motion_lora",
-            "source": "huggingface",
-            "title":  f"guoyww/animatediff motion LoRA {name}",
-        }
-        for name in (
-            "PanLeft", "PanRight",
-            "ZoomIn", "ZoomOut",
-            "TiltUp", "TiltDown",
-            "RollingClockwise", "RollingAnticlockwise",
-        )
-    ],
-
-    # -----------------------------------------------------------------
-    # Real-ESRGAN family of upscalers
-    # The 'ai-forever/Real-ESRGAN' mirror only carries x2/x4/x8 - anime
-    # and general models live elsewhere.
-    # -----------------------------------------------------------------
-    {
-        "pattern": re.compile(r"^realesrgan[_]?x4plus[_]?anime[_]?6b\.pth$"),
-        "url":    "https://huggingface.co/gemasai/RealESRGAN_x4plus_anime_6B/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
-        "folder": "upscale_models",
-        "size":   17938799,
-        "source": "huggingface",
-        "title":  "gemasai/RealESRGAN_x4plus_anime_6B",
-    },
-    {
-        "pattern": re.compile(r"^realesrgan[_]?x2(?:plus)?\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth",
-        "folder": "upscale_models",
-        "source": "huggingface",
-        "title":  "ai-forever/Real-ESRGAN (x2)",
-    },
-    {
-        "pattern": re.compile(r"^realesrgan[_]?x4(?:plus)?\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth",
-        "folder": "upscale_models",
-        "source": "huggingface",
-        "title":  "ai-forever/Real-ESRGAN (x4)",
-    },
-    {
-        "pattern": re.compile(r"^realesrgan[_]?x8(?:plus)?\.pth$"),
-        "url":    "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x8.pth",
-        "folder": "upscale_models",
-        "source": "huggingface",
-        "title":  "ai-forever/Real-ESRGAN (x8)",
+        "title":  "depth-anything/Depth-Anything-V2-\\g<1>",
+        "_size_map": {"vitl": "Large", "vitb": "Base", "vits": "Small"},
     },
 ]
 
