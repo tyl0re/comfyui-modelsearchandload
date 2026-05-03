@@ -58,8 +58,13 @@ _LOCAL_INDEX_EXTS = (
 def _models_root_dirs() -> list[str]:
     """Return all top-level directories that may contain model files.
 
-    Includes ComfyUI's main `models/` directory plus every directory
-    registered via folder_paths (e.g. extra_model_paths.yaml entries).
+    Includes:
+      - ComfyUI's main `models/` directory
+      - Every directory registered via folder_paths (covers
+        extra_model_paths.yaml)
+      - `custom_nodes/<pack>/ckpts/` and similar local cache folders
+        used by some custom-node packs (notably comfyui_controlnet_aux,
+        which keeps its annotator checkpoints inside its own folder).
     """
     roots: list[str] = []
     seen: set[str] = set()
@@ -93,6 +98,24 @@ def _models_root_dirs() -> list[str]:
                     add(os.path.dirname(p))
             except Exception:
                 continue
+        # Custom-node-internal model cache folders. Some packs (e.g.
+        # comfyui_controlnet_aux) bundle their annotator checkpoints
+        # inside the pack itself rather than under models/. We probe a
+        # short list of well-known names per pack so we don't accidentally
+        # walk the python source tree.
+        try:
+            base_dir = getattr(folder_paths, "base_path", None)
+            if base_dir:
+                custom_nodes_dir = os.path.join(base_dir, "custom_nodes")
+                if os.path.isdir(custom_nodes_dir):
+                    for entry in os.listdir(custom_nodes_dir):
+                        pack_dir = os.path.join(custom_nodes_dir, entry)
+                        if not os.path.isdir(pack_dir):
+                            continue
+                        for cache_name in ("ckpts", "models", "checkpoints"):
+                            add(os.path.join(pack_dir, cache_name))
+        except Exception:
+            pass
     return roots
 
 
@@ -239,6 +262,19 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
     if bn_lc.startswith("film_") or bn_lc.startswith("film-") or bn_lc.startswith("rife"):
         return "frame_interpolation"
 
+    # Depth Anything checkpoints belong to comfyui_controlnet_aux's local
+    # ckpts/ folder. We surface them as 'controlnet_aux' which is just a
+    # logical label - the download manager will route them correctly via
+    # the known-models DB entry.
+    if bn_lc.startswith("depth_anything_") or bn_lc.startswith("depth-anything-"):
+        return "controlnet_aux"
+
+    # ControlNet model files frequently start with these prefixes, regardless
+    # of which loader node references them.
+    if (bn_lc.startswith("control_") or bn_lc.startswith("controlnet")
+            or bn_lc.startswith("t2iadapter_") or bn_lc.startswith("t2i-adapter")):
+        return "controlnet"
+
     if bn_lc.endswith(".onnx"):
         # ONNX files are NEVER checkpoints/loras/etc. Pick a folder based
         # on what the custom-node ecosystem expects:
@@ -370,6 +406,12 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "OpenposePreprocessor":          [(0, "dwpose")],
     "UltralyticsDetectorProvider":   [(0, "ultralytics")],
     "YOLOWorldModelLoader":          [(0, "ultralytics")],
+    # comfyui_controlnet_aux preprocessors that take a checkpoint filename
+    # in slot 0. The actual ckpt lives inside the pack at
+    # custom_nodes/comfyui_controlnet_aux/ckpts/, mapped via the logical
+    # folder name 'controlnet_aux' to that path in get_target_directory().
+    "DepthAnythingPreprocessor":     [(0, "controlnet_aux")],
+    "Zoe_DepthAnythingPreprocessor": [(0, "controlnet_aux")],
 }
 
 
@@ -498,19 +540,43 @@ def scan_workflow(workflow: dict) -> list[dict]:
     return found
 
 
+# Logical folder names that don't exist in folder_paths but do correspond
+# to a well-known location inside a custom-node pack. Mapped here so the
+# download manager routes the file into the right place automatically.
+# Each value is a (custom_nodes_subdir, relative_subpath) tuple.
+_CUSTOM_NODE_FOLDERS: dict[str, tuple[str, str]] = {
+    "controlnet_aux": ("comfyui_controlnet_aux", "ckpts"),
+}
+
+
 def get_target_directory(folder_key: str) -> str:
     """Return the absolute path where a model of the given type should be saved."""
     if folder_paths is not None:
+        # 1. Check ComfyUI's registered folders
         try:
             paths = folder_paths.get_folder_paths(folder_key)
             if paths:
                 return paths[0]
         except Exception:
             pass
+
+        # 2. Check our custom-node-folder map (for things like
+        #    comfyui_controlnet_aux/ckpts which are not registered globally
+        #    but ARE the canonical location for a class of models).
+        if folder_key in _CUSTOM_NODE_FOLDERS:
+            try:
+                base_dir = getattr(folder_paths, "base_path", None)
+                if base_dir:
+                    pack, sub = _CUSTOM_NODE_FOLDERS[folder_key]
+                    return os.path.join(base_dir, "custom_nodes", pack, sub)
+            except Exception:
+                pass
+
+        # 3. Fall back to <models>/<folder_key>/
         try:
             base = folder_paths.models_dir
             return os.path.join(base, folder_key)
         except Exception:
             pass
-    # Fallback: relative to CWD
+    # 4. Last resort: relative to CWD
     return os.path.join(os.getcwd(), "models", folder_key)

@@ -82,5 +82,71 @@
     "folder": "controlnet",
     "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
     "source": "huggingface"
+  },
+  "depth_anything_vitl14.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/LiheYoung/depth_anything_vitl14/resolve/main/pytorch_model.bin",
+    "source": "huggingface",
+    "size": 1340742306,
+    "note": "Original Depth Anything V1 ViT-L checkpoint. Stored on HF as pytorch_model.bin but ComfyUI custom_controlnet_aux expects this filename."
+  },
+  "depth_anything_vitb14.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/LiheYoung/depth_anything_vitb14/resolve/main/pytorch_model.bin",
+    "source": "huggingface",
+    "size": 387442978
+  },
+  "depth_anything_vits14.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/LiheYoung/depth_anything_vits14/resolve/main/pytorch_model.bin",
+    "source": "huggingface",
+    "size": 99166210
+  },
+  "depth_anything_v2_vitl.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
+    "source": "huggingface",
+    "size": 1340710354
+  },
+  "depth_anything_v2_vitb.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth",
+    "source": "huggingface",
+    "size": 389492946
+  },
+  "depth_anything_v2_vits.pth": {
+    "folder": "controlnet_aux",
+    "url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth",
+    "source": "huggingface",
+    "size": 99176738
+  },
+  "controlnet11Models_depth.safetensors": {
+    "folder": "controlnet",
+    "url": "https://civitai.com/api/download/models/44736",
+    "source": "civitai",
+    "size": 722601034,
+    "needs_token": true,
+    "note": "Lykon's repackaged ControlNet 1.1 Depth model from CivitAI. CivitAI's API does not surface this filename directly, so it must be hardcoded here."
+  },
+  "controlnet11Models_openpose.safetensors": {
+    "folder": "controlnet",
+    "url": "https://civitai.com/api/download/models/44811",
+    "source": "civitai",
+    "size": 722601034,
+    "needs_token": true
+  },
+  "controlnet11Models_canny.safetensors": {
+    "folder": "controlnet",
+    "url": "https://civitai.com/api/download/models/44774",
+    "source": "civitai",
+    "size": 722601034,
+    "needs_token": true
+  },
+  "controlnet11Models_tileE.safetensors": {
+    "folder": "controlnet",
+    "url": "https://civitai.com/api/download/models/67566",
+    "source": "civitai",
+    "size": 722601034,
+    "needs_token": true
   }
 }
