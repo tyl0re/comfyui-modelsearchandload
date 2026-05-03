@@ -284,6 +284,26 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
             or bn_lc.startswith("t2iadapter_") or bn_lc.startswith("t2i-adapter")):
         return "controlnet"
 
+    # Upscaler models. Common naming patterns put these on a clear
+    # path - we recognise them regardless of which loader node is in
+    # the workflow (Reactor, WAS, multiGPU, Searge, vanilla, etc.).
+    if (bn_lc.startswith("realesrgan")
+            or bn_lc.startswith("real-esrgan")
+            or bn_lc.startswith("realesr_")
+            or bn_lc.startswith("real_esrgan")
+            or bn_lc.startswith("4x_") or bn_lc.startswith("4x-")
+            or bn_lc.startswith("2x_") or bn_lc.startswith("2x-")
+            or bn_lc.startswith("8x_") or bn_lc.startswith("8x-")
+            or bn_lc.startswith("ultrasharp")
+            or "esrgan" in bn_lc
+            or "swinir" in bn_lc
+            or "ldsr" in bn_lc
+            or bn_lc.startswith("nmkd")
+            or bn_lc.startswith("anime6b")
+            or bn_lc.startswith("4xfacefix")
+            or bn_lc.startswith("gfpgan")):
+        return "upscale_models"
+
     # AnimateDiff motion modules vs LoRAs. These are NOT regular
     # checkpoints despite the .ckpt extension. We split here:
     #   *_lora.safetensors -> loras (it's a regular LoRA file applied
@@ -472,8 +492,21 @@ def _iter_api_inputs(node: dict) -> Iterable[tuple[str, str]]:
 def _iter_ui_widgets(node: dict) -> Iterable[tuple[str, str, str]]:
     """
     UI-format node: yield (synthetic_field, value, folder_hint).
-    Only yields slots we KNOW are model filenames - prompts and other
-    string widgets are skipped to avoid false positives.
+
+    Strategy:
+      1. If we have a hand-curated slot map for this exact node type,
+         use it - that's the most precise.
+      2. Otherwise scan EVERY widget value and yield each that looks
+         like a model filename. There are too many third-party loader /
+         upscaler / preprocessor nodes to whitelist them all
+         (Reactor, WAS, multiGPU, Searge, Bjornulf, DTUpscale, ...),
+         so we trust the file extension as the primary signal.
+
+    The folder hint is derived from:
+      a) node-type heuristic (if the type contains 'upscale', etc.)
+      b) filename heuristic (e.g. AnimateLCM_*.ckpt -> animatediff_models),
+         which overrides (a) when the filename clearly identifies a
+         family.
     """
     node_type = node.get("type") or ""
     wv = node.get("widgets_values")
@@ -490,18 +523,27 @@ def _iter_ui_widgets(node: dict) -> Iterable[tuple[str, str, str]]:
                 refined = _guess_folder_for_field(f"_widget[{idx}]", v) or folder
                 yield f"_widget[{idx}]", v, refined
         return
-    # Heuristic fallback: only consider widget values that *look* like model
-    # filenames AND whose node type clearly indicates a model loader.
+
+    # Liberal fallback: yield every widget value that looks like a model
+    # filename. Filters in _looks_like_model_filename already exclude
+    # prompt text, very long strings, and strings with newlines.
     base_hint = _guess_folder_for_node_type(node_type)
-    if base_hint is None and "load" not in node_type.lower():
-        return
-    nt_lc = node_type.lower()
-    if "loader" not in nt_lc and "load" not in nt_lc:
-        return
     for i, v in enumerate(wv):
-        if isinstance(v, str) and _looks_like_model_filename(v):
-            refined = _guess_folder_for_field(f"_widget[{i}]", v) or base_hint or "checkpoints"
-            yield f"_widget[{i}]", v, refined
+        if not isinstance(v, str):
+            continue
+        if not _looks_like_model_filename(v):
+            continue
+        # Filename-derived folder always wins - it knows that
+        # 'depth_anything_*.pth' is NOT a checkpoint regardless of which
+        # node loaded it. node-type heuristic is the fallback when the
+        # filename doesn't ring any specific bells. Final fallback is
+        # 'checkpoints' so the file at least gets surfaced.
+        refined = (
+            _guess_folder_for_field(f"_widget[{i}]", v)
+            or base_hint
+            or "checkpoints"
+        )
+        yield f"_widget[{i}]", v, refined
 
 
 def scan_workflow(workflow: dict) -> list[dict]:
