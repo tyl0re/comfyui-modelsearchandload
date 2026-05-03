@@ -13,12 +13,12 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.urls]
-Homepage      = "https://github.com/CHANGEME/comfyui-modelsearchandload"
-Repository    = "https://github.com/CHANGEME/comfyui-modelsearchandload"
-Documentation = "https://github.com/CHANGEME/comfyui-modelsearchandload#readme"
-Issues        = "https://github.com/CHANGEME/comfyui-modelsearchandload/issues"
+Homepage      = "https://github.com/tyl0re/comfyui-modelsearchandload"
+Repository    = "https://github.com/tyl0re/comfyui-modelsearchandload"
+Documentation = "https://github.com/tyl0re/comfyui-modelsearchandload#readme"
+Issues        = "https://github.com/tyl0re/comfyui-modelsearchandload/issues"
 
 [tool.comfy]
-PublisherId   = "CHANGEME"
+PublisherId   = "tyl0re"
 DisplayName   = "Model Search and Load"
 Icon          = ""
