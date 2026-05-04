@@ -10,7 +10,7 @@ import urllib.error
 import json as _json
 from typing import Any
 
-from .config import load_config, load_known_models
+from .config import load_config, load_known_models, load_user_known_models
 from .patterns import (
     filename_aliases,
     is_upstream_alias,
@@ -76,6 +76,123 @@ def _trusted_author(repo_id: str) -> bool:
         return False
     return repo_id.split("/", 1)[0] in _TRUSTED_HF_AUTHORS
 
+
+def _filename_match_type(requested: str, candidate: str) -> str:
+    """Classify how strongly a returned file name matches the workflow name."""
+    req = (requested or "").replace("\\", "/").rsplit("/", 1)[-1]
+    cand = (candidate or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if not req or not cand:
+        return "none"
+    req_lc = req.lower()
+    cand_lc = cand.lower()
+    if cand_lc == req_lc:
+        return "exact"
+    req_norm = normalise_filename(req_lc)
+    cand_norm = normalise_filename(cand_lc)
+    if cand_norm == req_norm:
+        return "normalized"
+    req_base = req_lc.rsplit(".", 1)[0]
+    cand_base = cand_lc.rsplit(".", 1)[0]
+    if req_base and (req_base in cand_base or cand_base in req_base):
+        return "partial"
+    return "none"
+
+
+def _repo_id_from_candidate(c: dict) -> str:
+    repo_id = c.get("repo") or ""
+    if repo_id:
+        return repo_id
+    title = c.get("title") or ""
+    if title.count("/") >= 1:
+        return "/".join(title.split("/")[:2])
+    return ""
+
+
+def _annotate_confidence(filename: str, candidates: list[dict]) -> None:
+    """Attach conservative confidence metadata used by UI and bulk download.
+
+    The bias is intentional: unknown is better than wrong. Curated DB and
+    pattern hits remain safe; remote hits need exact evidence plus trust.
+    """
+    for c in candidates:
+        source = c.get("source") or ""
+        via = c.get("_via") or ""
+        repo_id = _repo_id_from_candidate(c)
+        match_type = c.get("_match_type") or _filename_match_type(filename, c.get("filename") or "")
+        downloads = int(c.get("downloads") or 0)
+
+        score = 0
+        reasons: list[str] = []
+        if c.get("preferred") or via == "known" or source == "known":
+            score = 200
+            reasons.append("curated DB entry")
+        elif via == "pattern":
+            score = 185
+            reasons.append("deterministic pattern rule")
+        else:
+            if match_type == "exact":
+                score += 80
+                reasons.append("exact filename in source")
+            elif match_type == "normalized":
+                score += 65
+                reasons.append("filename matches after normalization")
+            elif match_type == "partial":
+                score += 35
+                reasons.append("partial filename match only")
+            else:
+                reasons.append("no exact file confirmation")
+
+            if source == "huggingface":
+                if _trusted_author(repo_id):
+                    score += 35
+                    reasons.append("trusted HuggingFace author")
+                if via == "fallback":
+                    score += 15
+                    reasons.append("known umbrella repo probe")
+                elif via == "fulltext":
+                    score += 8
+                    reasons.append("README/full-text hit")
+                elif via == "search":
+                    score += 3
+                if c.get("_alias_match"):
+                    score -= 35
+                    reasons.append("upstream file uses a different name")
+            elif source == "civitai":
+                score += 5
+                reasons.append("CivitAI file match")
+
+            if downloads >= 1_000_000:
+                score += 15
+            elif downloads >= 100_000:
+                score += 10
+            elif downloads >= 10_000:
+                score += 5
+
+        c["match_type"] = match_type
+        c["confidence"] = max(0, min(200, score))
+        c["confidence_reasons"] = reasons
+        if score >= 160:
+            c["confidence_label"] = "exact"
+        elif score >= 105:
+            c["confidence_label"] = "high"
+        elif score >= 80:
+            c["confidence_label"] = "likely"
+        else:
+            c["confidence_label"] = "low"
+        c["auto_safe"] = bool(score >= 105 and match_type in ("exact", "normalized"))
+
+    sorted_by_score = sorted(candidates, key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
+    if len(sorted_by_score) >= 2:
+        top = int(sorted_by_score[0].get("confidence") or 0)
+        second = int(sorted_by_score[1].get("confidence") or 0)
+        if top < 160 and top - second < 25:
+            for c in sorted_by_score:
+                if int(c.get("confidence") or 0) >= second:
+                    c["ambiguous"] = True
+                    c["auto_safe"] = False
+                    c["confidence_label"] = "ambiguous"
+                    c.setdefault("confidence_reasons", []).append("multiple close candidates")
+
 # In-memory cache: filename -> (timestamp, results)
 _search_cache: dict[str, tuple[float, list[dict]]] = {}
 _CACHE_TTL_S = 300  # 5 minutes
@@ -117,6 +234,11 @@ def lookup_known(filename: str) -> dict | None:
     not the canonical key from the DB.
     """
     db = load_known_models()
+    user_db = load_user_known_models()
+    if user_db:
+        merged = dict(db)
+        merged.update(user_db)
+        db = merged
     if not db:
         return None
 
@@ -825,6 +947,7 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
             "gated": bool(gated),
             "_query": c.get("_query"),
             "_via": c["via"],
+            "_match_type": "alias" if c.get("_alias_match") else "exact",
         })
 
     # Deduplicate (same repo+path)
@@ -1005,6 +1128,12 @@ def _civitai_match_items(
                     or base_underscore in fn_underscore
                 ):
                     continue
+                if fn_lc == target_lc:
+                    match_type = "exact"
+                elif fn_underscore == target_underscore:
+                    match_type = "normalized"
+                else:
+                    match_type = "partial"
                 key = (str(m.get("id")), fname)
                 if key in seen_files:
                     continue
@@ -1025,6 +1154,7 @@ def _civitai_match_items(
                     "needs_token": True,
                     "_civitai_model_id": m.get("id"),
                     "_civitai_version_id": v.get("id"),
+                    "_match_type": match_type,
                 })
     return out
 
@@ -1174,6 +1304,7 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
         if folder_hint:
             for c in out:
                 c.setdefault("folder", folder_hint)
+        _annotate_confidence(filename, out)
         _search_cache[filename] = (time.time(), [dict(c) for c in out])
         return out
 
@@ -1191,7 +1322,8 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
             c.setdefault("folder", folder_hint)
 
     # Final ranking across all sources combined.
-    out.sort(key=_candidate_sort_key)
+    _annotate_confidence(filename, out)
+    out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
 
     _search_cache[filename] = (time.time(), [dict(c) for c in out])
     return out

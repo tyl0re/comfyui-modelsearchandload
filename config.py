@@ -8,6 +8,7 @@ from pathlib import Path
 PLUGIN_DIR = Path(__file__).parent
 CONFIG_FILE = PLUGIN_DIR / "config.json"
 KNOWN_MODELS_FILE = PLUGIN_DIR / "known_models.json"
+USER_KNOWN_MODELS_FILE = PLUGIN_DIR / "user_known_models.json"
 
 DEFAULT_CONFIG = {
     "huggingface_token": "",
@@ -56,6 +57,31 @@ def load_known_models() -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+def load_user_known_models() -> dict:
+    """Load locally learned user selections.
+
+    This file is intentionally separate from the bundled DB so users can
+    keep personal workflow fixes without making them look curated upstream.
+    """
+    if not USER_KNOWN_MODELS_FILE.exists():
+        return {}
+    try:
+        with open(USER_KNOWN_MODELS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_user_known_model(filename: str, entry: dict) -> None:
+    if not filename or not isinstance(entry, dict):
+        return
+    data = load_user_known_models()
+    data[filename] = entry
+    with open(USER_KNOWN_MODELS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
 
 
 # Mapping of node-input fields -> ComfyUI model subfolder

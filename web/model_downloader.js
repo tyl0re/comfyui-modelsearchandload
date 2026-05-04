@@ -176,8 +176,8 @@ function buildPanel(container) {
     if (!lastMissing.length) return;
     const ok = confirm(
       `Auto-download ${lastMissing.length} missing model(s)?\n\n` +
-      `For each, the best matching candidate from the curated DB, ` +
-      `HuggingFace, or CivitAI will be picked automatically.\n\n` +
+      `Only high-confidence sources are downloaded automatically. ` +
+      `Ambiguous or weak matches are skipped so you can inspect them manually.\n\n` +
       `Gated HF models (like FLUX.1-dev) require a token in Settings.`,
     );
     if (!ok) return;
@@ -200,6 +200,8 @@ function buildPanel(container) {
       const queued = results.filter(r => r.status === "queued");
       const alreadyActive = results.filter(r => r.status === "already_active");
       const noSource = results.filter(r => r.status === "no_source");
+      const ambiguous = results.filter(r => r.status === "ambiguous");
+      const lowConfidence = results.filter(r => r.status === "low_confidence");
       const errors = results.filter(r => r.status === "error");
 
       // Remember which missing-row corresponds to which download job.
@@ -230,6 +232,8 @@ function buildPanel(container) {
       if (queued.length) parts.push(`✓ ${queued.length} queued`);
       if (alreadyActive.length) parts.push(`↻ ${alreadyActive.length} already running`);
       if (noSource.length) parts.push(`⚠ ${noSource.length} no source`);
+      if (ambiguous.length) parts.push(`? ${ambiguous.length} ambiguous`);
+      if (lowConfidence.length) parts.push(`! ${lowConfidence.length} low confidence`);
       if (errors.length) parts.push(`✗ ${errors.length} errors`);
       status.textContent = parts.join(" · ") || "Nothing happened.";
     } catch (e) {
@@ -568,6 +572,10 @@ function annotateMissingFromBulk(parent, results) {
       _setBadge(badge, "↻ Already downloading", "#ffb74d", true);
     } else if (r.status === "no_source") {
       _setBadge(badge, "No download source found - try Find sources manually", "#ffb74d");
+    } else if (r.status === "ambiguous") {
+      _setBadge(badge, `Ambiguous source - inspect candidates manually`, "#ffb74d");
+    } else if (r.status === "low_confidence") {
+      _setBadge(badge, `Low-confidence source - skipped`, "#ffb74d");
     } else if (r.status === "error") {
       _setBadge(badge, "✗ " + (r.reason || "error"), "#ef9a9a");
     }
@@ -883,12 +891,36 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       },
     });
     const title = el("span", { textContent: c.title || c.filename || c.url });
+    const confidenceLabel = c.confidence_label || "unknown";
+    const confidenceColor = confidenceLabel === "exact" || confidenceLabel === "high"
+      ? "#66bb6a"
+      : confidenceLabel === "likely"
+        ? "#ffb74d"
+        : confidenceLabel === "ambiguous"
+          ? "#ff9800"
+          : "#ef9a9a";
+    const confidenceTag = el("span", {
+      textContent: `${confidenceLabel.toUpperCase()}${c.confidence != null ? " " + c.confidence : ""}`,
+      title: (c.confidence_reasons || []).join("; "),
+      style: {
+        display: "inline-block",
+        padding: "1px 5px",
+        marginLeft: "5px",
+        borderRadius: "3px",
+        background: confidenceColor,
+        color: "#000",
+        fontSize: "10px",
+        fontWeight: "bold",
+      },
+    });
     const meta = el("div", {
       style: { fontSize: "10px", opacity: "0.7", marginTop: "2px" },
       textContent: [
         c.size ? fmtBytes(c.size) : null,
+        c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,
+        c.auto_safe ? "safe for Download all" : "manual review",
       ].filter(Boolean).join(" · "),
     });
     // Always show the full source URL as a small monospace line so the
@@ -956,8 +988,11 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
             url: c.url,
             folder: c.folder || folder,
             filename: c.filename || filename,
+            requested_filename: targetFilename,
             subfolder: subfolder,
             source: c.source,
+            title: c.title,
+            size: c.size,
           }),
         });
 
@@ -1008,7 +1043,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         btn.textContent = "Download";
       }
     };
-    row.append(tag, title, meta, sourceLine, btn);
+    row.append(tag, title, confidenceTag, meta, sourceLine, btn);
     parent.append(row);
   }
 }

@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover
 from .scanner import scan_workflow
 from .sources import find_candidates
 from .downloader import manager
-from .config import load_config, save_config, DEFAULT_CONFIG
+from .config import load_config, save_config, DEFAULT_CONFIG, save_user_known_model
 
 
 _REGISTERED = False
@@ -77,6 +77,7 @@ def register_routes() -> None:
         url = payload.get("url")
         folder = payload.get("folder")
         filename = payload.get("filename")
+        requested_filename = payload.get("requested_filename") or filename
         subfolder = payload.get("subfolder") or ""
         source = payload.get("source", "manual")
         size = payload.get("size")
@@ -92,6 +93,19 @@ def register_routes() -> None:
             url=url, folder=folder, filename=filename,
             subfolder=subfolder, source=source, expected_size=expected_size,
         )
+        try:
+            if requested_filename and url:
+                save_user_known_model(requested_filename, {
+                    "source": source or "manual",
+                    "title": payload.get("title") or requested_filename,
+                    "filename": requested_filename,
+                    "folder": folder,
+                    "url": url,
+                    "size": expected_size,
+                    "_reason": "learned from manual user download",
+                })
+        except Exception:
+            pass
         # If enqueue() returned a job that was already running for the same
         # filename + destination, we tell the client so the UI can show
         # "already in progress" instead of "queued".
@@ -237,11 +251,24 @@ def register_routes() -> None:
                 results.append({"name": name, "status": "no_source", "reason": "no candidate found"})
                 continue
 
-            # Pick the best candidate:
-            # 1. Anything marked "preferred" (came from the curated DB)
-            # 2. Otherwise highest download count
-            preferred = [c for c in candidates if c.get("preferred")]
-            chosen = preferred[0] if preferred else candidates[0]
+            # Pick only candidates that passed the conservative confidence
+            # gate. Unknown/ambiguous is safer than downloading the wrong
+            # model into a workflow-visible path.
+            safe = [c for c in candidates if c.get("auto_safe")]
+            if not safe:
+                best = candidates[0]
+                status_name = "ambiguous" if best.get("ambiguous") else "low_confidence"
+                results.append({
+                    "name": name,
+                    "status": status_name,
+                    "reason": best.get("confidence_reasons") or ["no high-confidence source"],
+                    "confidence": best.get("confidence"),
+                    "title": best.get("title"),
+                    "source": best.get("source"),
+                })
+                continue
+
+            chosen = safe[0]
 
             try:
                 size_hint = chosen.get("size")
@@ -268,6 +295,7 @@ def register_routes() -> None:
                     "source": chosen.get("source"),
                     "title": chosen.get("title"),
                     "gated": chosen.get("gated", False),
+                    "confidence": chosen.get("confidence"),
                 })
             except Exception as e:
                 results.append({"name": name, "status": "error", "reason": f"enqueue failed: {e}"})
