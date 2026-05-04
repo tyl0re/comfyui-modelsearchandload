@@ -848,6 +848,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
     row.setAttribute("data-md-candidate-filename", targetFilename);
     const sourceLabel = c.web_found ? "WEB"
                       : c.hf_fallback_found ? "HF"
+                      : c.search_fallback_found ? "SRC"
                       : c.source.toUpperCase();
     const tag = el("span", {
       textContent: sourceLabel,
@@ -921,6 +922,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         c.size ? fmtBytes(c.size) : null,
         c.web_found ? "verified via web search" : null,
         c.hf_fallback_found ? "found via HuggingFace fallback" : null,
+        c.search_fallback_found ? "found via normal source fallback" : null,
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,

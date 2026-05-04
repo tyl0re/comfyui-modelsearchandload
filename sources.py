@@ -1121,6 +1121,20 @@ def search_web_for_huggingface(filename: str, limit: int = 8) -> list[dict]:
             if len(out) >= limit:
                 break
 
+    # Last resort: show the same verified candidates that "Find sources"
+    # would show. This covers CivitAI-only results and local learned entries,
+    # so Search web never returns empty when the normal resolver has a source.
+    if not out:
+        for cand in find_candidates(filename):
+            key = (cand.get("repo") or cand.get("title") or "", cand.get("filename") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            cand["search_fallback_found"] = True
+            out.append(cand)
+            if len(out) >= limit:
+                break
+
     _annotate_confidence(filename, out)
     out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
     return out
