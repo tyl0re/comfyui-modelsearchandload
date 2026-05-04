@@ -843,85 +843,258 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
 
 # ---------- CivitAI ----------
 
-def search_civitai(filename: str, limit: int = 5) -> list[dict]:
-    """Search CivitAI by filename. CivitAI's search uses 'query' on names."""
+def _build_civitai_queries(filename: str) -> list[str]:
+    """Generate query strings to try against CivitAI's search API.
+
+    CivitAI's API only matches against the parent model NAME (not file
+    names within versions). Many community-trained LoRAs follow the
+    pattern '<ModelName>_v<N>-NNNNNN.safetensors' where the model name
+    on CivitAI uses spaces instead of underscores. We have to construct
+    queries that match the human-readable model name.
+    """
+    parts = _split_tokens(filename)  # preserves order, no stopword filter
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str):
+        q = q.strip()
+        if not q:
+            return
+        norm = q.lower()
+        if norm in seen:
+            return
+        seen.add(norm)
+        queries.append(q)
+
+    # Full base without extension
+    add(filename.rsplit(".", 1)[0])
+
+    # Token spans of length 2..4, joined with SPACE (CivitAI separator)
+    # AND with hyphen (some model names have hyphens)
+    for span_len in range(min(len(parts), 4), 1, -1):
+        for start in range(0, len(parts) - span_len + 1):
+            span = parts[start:start + span_len]
+            # Skip pure-digit / version-suffix spans like 'v3-000007'
+            if all(re.fullmatch(r"v?\d+(-?\d+)*", t) for t in span):
+                continue
+            add(" ".join(span))
+
+    # Single distinctive tokens (capitalised-words first)
+    for t in _tokenize_filename(filename)[:3]:
+        add(t)
+
+    return queries[:8]
+
+
+def _civitai_tags_for_filename(filename: str) -> list[str]:
+    """Guess likely CivitAI tags from a filename.
+
+    CivitAI's tag-based search is way more accurate than its query-by-
+    name search - especially for older models that drop out of the
+    'recently uploaded' default ranking. We use these tags as a
+    second-chance lookup when the query-based search returns nothing.
+    """
+    fn_lc = filename.lower()
+    tags: list[str] = []
+
+    # Direct keyword matches
+    for keyword in [
+        "detailer", "upscaler", "controlnet", "ipadapter",
+        "animatediff", "animatelcm", "lcm",
+        "depth", "openpose", "canny", "lineart", "scribble",
+        "anime", "realistic", "style", "character",
+        "inpaint", "outpaint", "turbo", "lightning",
+    ]:
+        if keyword in fn_lc:
+            tags.append(keyword)
+
+    # Model family keywords
+    for family in ["flux", "sdxl", "pony", "illustrious"]:
+        if family in fn_lc:
+            tags.append(family)
+            break  # one family is enough
+
+    return tags
+
+
+def _civitai_paginated_search(url: str, max_pages: int = 3, t: int = 15) -> list[dict]:
+    """Walk CivitAI's cursor-paginated /api/v1/models response.
+
+    Returns the concatenated `items` arrays. CivitAI caps `limit` at
+    100 per page, so for tag-based browsing we need to follow
+    metadata.nextPage to reach less-popular models.
+    """
     cfg = load_config()
     headers = {}
     token = cfg.get("civitai_token")
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    base = filename.rsplit(".", 1)[0]
-    # Try several queries: full base, then top distinctive tokens
-    tokens = _tokenize_filename(filename)
-    queries = [base]
-    for t in tokens[:2]:
-        if t.lower() not in (q.lower() for q in queries):
-            queries.append(t)
+    all_items: list[dict] = []
+    next_url = url
+    for _ in range(max_pages):
+        try:
+            data = _http_get_json(next_url, headers=headers, timeout=t)
+        except Exception:
+            break
+        items = data.get("items") if isinstance(data, dict) else None
+        if not items:
+            break
+        all_items.extend(items)
+        meta = data.get("metadata") or {}
+        next_url = meta.get("nextPage")
+        if not next_url:
+            break
+    return all_items
+
+
+_CIVITAI_TYPE_TO_FOLDER: dict[str, str] = {
+    "checkpoint": "checkpoints",
+    "lora": "loras",
+    "locon": "loras",
+    "lycoris": "loras",
+    "textualinversion": "embeddings",
+    "hypernetwork": "hypernetworks",
+    "vae": "vae",
+    "controlnet": "controlnet",
+    "upscaler": "upscale_models",
+}
+
+
+def _civitai_match_items(
+    items: list[dict],
+    filename: str,
+    seen_files: set[tuple[str, str]],
+) -> list[dict]:
+    """Walk a CivitAI /api/v1/models response page and pull out
+    candidate dicts for any file that matches `filename`.
+
+    Match is generous so we catch training-checkpoint-style filenames
+    (e.g. workflow asks for 'Flux_Detailer_v3-000007.safetensors',
+    CivitAI stores it under the same name in version 'V3'):
+      - exact lowercase equality, or
+      - equality after underscore/hyphen/space normalisation, or
+      - filename basename appears as a substring of the candidate file
+        (catches per-epoch / per-step trainer dumps).
+
+    `seen_files` is mutated to avoid emitting the same model+file twice
+    across multiple search phases.
+    """
+    target_lc = filename.lower()
+    base_lc = filename.rsplit(".", 1)[0].lower()
+    target_underscore = target_lc.replace("-", "_").replace(" ", "_")
+    base_underscore = base_lc.replace("-", "_").replace(" ", "_")
+
+    out: list[dict] = []
+    for m in items:
+        m_type = (m.get("type") or "").lower()
+        if m_type in ("workflows", "wildcards", "other"):
+            continue
+        name = m.get("name", "")
+        for v in m.get("modelVersions", []) or []:
+            for f in v.get("files", []) or []:
+                fname = f.get("name", "")
+                if not fname:
+                    continue
+                fn_lc = fname.lower()
+                fn_underscore = fn_lc.replace("-", "_").replace(" ", "_")
+                if not (
+                    fn_lc == target_lc
+                    or fn_underscore == target_underscore
+                    or base_lc in fn_lc
+                    or base_underscore in fn_underscore
+                ):
+                    continue
+                key = (str(m.get("id")), fname)
+                if key in seen_files:
+                    continue
+                seen_files.add(key)
+
+                download_url = f.get("downloadUrl") or v.get("downloadUrl")
+                if not download_url:
+                    continue
+                folder = _CIVITAI_TYPE_TO_FOLDER.get(m_type, "checkpoints")
+                out.append({
+                    "source": "civitai",
+                    "title": f"{name} - {v.get('name', '')}",
+                    "filename": fname,
+                    "folder": folder,
+                    "url": download_url,
+                    "size": int((f.get("sizeKB") or 0) * 1024),
+                    "downloads": (m.get("stats") or {}).get("downloadCount", 0),
+                    "needs_token": True,
+                    "_civitai_model_id": m.get("id"),
+                    "_civitai_version_id": v.get("id"),
+                })
+    return out
+
+
+def search_civitai(filename: str, limit: int = 100) -> list[dict]:
+    """Search CivitAI for a file by name.
+
+    CivitAI's /api/v1/models doesn't index file names - only parent
+    model NAMES. We try two strategies in order:
+
+      1. Query-based search: pass token spans like 'Flux Detailer'
+         to ?query=...&limit=100. Cheap and fast when it works, but
+         CivitAI's relevance ranking aggressively favours recent
+         uploads, so older but popular models (e.g. id=685874 'Flux
+         Detailer' with 14k downloads but uploaded a year ago) drop
+         out of the result set.
+
+      2. Tag-based pagination: when the filename hints at a known
+         tag ('detailer', 'animatelcm', 'canny', ...), browse
+         ?tag=<tag>&types=<type>&sort=Most+Downloaded with cursor
+         pagination across a few pages. This reaches older popular
+         models the query-based search misses.
+    """
+    cfg = load_config()
+    headers = {}
+    token = cfg.get("civitai_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     results: list[dict] = []
-    target_lc = filename.lower()
-    base_lc = base.lower()
     seen_files: set[tuple[str, str]] = set()
 
-    for q in queries:
+    # Phase 1: query-based search ----------------------------------
+    for q in _build_civitai_queries(filename):
         if len(results) >= 5:
             break
         url = f"https://civitai.com/api/v1/models?limit={limit}&query={urllib.parse.quote(q)}"
         try:
-            data = _http_get_json(url, headers=headers, timeout=12)
+            data = _http_get_json(url, headers=headers, timeout=15)
         except Exception:
             continue
-
         items = data.get("items") if isinstance(data, dict) else None
         if not items:
             continue
+        results.extend(_civitai_match_items(items, filename, seen_files))
 
-        for m in items:
-            name = m.get("name", "")
-            m_type = (m.get("type") or "").lower()
-            for v in m.get("modelVersions", []) or []:
-                for f in v.get("files", []) or []:
-                    fname = f.get("name", "")
-                    if not fname:
-                        continue
-                    match = (
-                        fname.lower() == target_lc
-                        or fname.lower().endswith("/" + target_lc)
-                        or base_lc in fname.lower()
-                    )
-                    if not match:
-                        continue
-                    key = (str(m.get("id")), fname)
-                    if key in seen_files:
-                        continue
-                    seen_files.add(key)
-
-                    download_url = f.get("downloadUrl") or v.get("downloadUrl")
-                    if not download_url:
-                        continue
-                    folder = {
-                        "checkpoint": "checkpoints",
-                        "lora": "loras",
-                        "locon": "loras",
-                        "lycoris": "loras",
-                        "textualinversion": "embeddings",
-                        "hypernetwork": "hypernetworks",
-                        "vae": "vae",
-                        "controlnet": "controlnet",
-                        "upscaler": "upscale_models",
-                    }.get(m_type, "checkpoints")
-
-                    results.append({
-                        "source": "civitai",
-                        "title": f"{name} - {v.get('name', '')}",
-                        "filename": fname,
-                        "folder": folder,
-                        "url": download_url,
-                        "size": int((f.get("sizeKB") or 0) * 1024),
-                        "downloads": (m.get("stats") or {}).get("downloadCount", 0),
-                        "needs_token": True,
-                    })
+    # Phase 2: tag-based pagination -------------------------------
+    # Cheap second-pass that catches older popular models.
+    if len(results) < 3:
+        tags = _civitai_tags_for_filename(filename)
+        # Pick a likely model-type filter from the filename so we don't
+        # drag in workflow ZIPs or wildcards.
+        types_filter = ""
+        fn_lc = filename.lower()
+        if fn_lc.endswith((".safetensors", ".ckpt", ".pt")):
+            # Most ComfyUI-side files are LoRAs or Checkpoints
+            types_filter = "&types=LORA&types=Checkpoint"
+        for tag in tags:
+            if len(results) >= 5:
+                break
+            url = (
+                f"https://civitai.com/api/v1/models?limit=100"
+                f"&tag={urllib.parse.quote(tag)}"
+                f"&sort=Most+Downloaded"
+                f"{types_filter}"
+            )
+            items = _civitai_paginated_search(url, max_pages=3, t=15)
+            if not items:
+                continue
+            results.extend(_civitai_match_items(items, filename, seen_files))
 
     results.sort(key=lambda r: r.get("downloads", 0), reverse=True)
     return results
