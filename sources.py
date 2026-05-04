@@ -1460,8 +1460,7 @@ def find_candidates(
         # Short-circuit: a curated DB entry or pattern-rule hit is
         # hand-picked / generated for this exact filename, so there's
         # no need to hit HuggingFace + CivitAI in addition. Skipping
-        # those saves ~6 seconds per lookup, which compounds noticeably
-        # during "Download all" of many files.
+        # those saves ~6 seconds per lookup on repeated manual searches.
         if folder_hint:
             for c in out:
                 c.setdefault("folder", folder_hint)
