@@ -28,6 +28,8 @@ _ALL_FOLDER_KEYS = [
     "unet", "diffusion_models", "upscale_models", "embeddings",
     "style_models", "ipadapter", "gligen", "hypernetworks",
     "vae_approx", "photomaker", "instantid", "insightface",
+    "latent_upscale_models", "clip_gguf", "model_gguf", "vae_gguf",
+    "audio_encoders", "encoder_gguf",
 ]
 
 
@@ -290,6 +292,10 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
         return "loras"
     if "vae" in bn_lc:
         return "vae"
+    if "spatial-upscaler" in bn_lc or "latent-upscaler" in bn_lc:
+        return "latent_upscale_models"
+    if "embeddings_connector" in bn_lc:
+        return "clip"
     if bn_lc.startswith("ltx-2") or bn_lc.startswith("ltx2"):
         return "diffusion_models"
 
@@ -477,6 +483,19 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     # ComfyUI core: frame interpolation (FILM, RIFE, ...). Lives in
     # models/frame_interpolation/.
     "FrameInterpolationModelLoader": [(0, "frame_interpolation")],
+    "LatentUpscaleModelLoader":      [(0, "latent_upscale_models")],
+    "LowVRAMLatentUpscaleModelLoader": [(0, "latent_upscale_models")],
+    "MelBandRoFormerModelLoader":    [(0, "diffusion_models")],
+    "LoaderGGUF":                    [(0, "unet")],
+    "LoaderGGUFAdvanced":            [(0, "unet")],
+    "UnetLoaderGGUF":                [(0, "unet")],
+    "UnetLoaderGGUFAdvanced":        [(0, "unet")],
+    "CLIPLoaderGGUF":                [(0, "clip")],
+    "DualCLIPLoaderGGUF":            [(0, "clip"), (1, "clip")],
+    "TripleCLIPLoaderGGUF":          [(0, "clip"), (1, "clip"), (2, "clip")],
+    "QuadrupleCLIPLoaderGGUF":       [(0, "clip"), (1, "clip"), (2, "clip"), (3, "clip")],
+    "LTXVGemmaCLIPModelLoader":      [(0, "text_encoders"), (1, "checkpoints")],
+    "LTXAVTextEncoderLoader":        [(0, "text_encoders"), (1, "checkpoints")],
     # Kijai's ComfyUI-WanAnimatePreprocess: ViTPose + YOLO ONNX models go
     # into models/detection/ (the node registers this folder itself).
     # Slot 0 = vitpose_model, slot 1 = yolo_model.
@@ -504,6 +523,22 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "ADE_AnimateDiffLoRALoader":         [(0, "animatediff_motion_lora")],
     "AnimateDiffLoaderV1":                [(0, "animatediff_models")],
     "AnimateDiffModuleLoader":            [(0, "animatediff_models")],
+}
+
+_STRICT_UI_NODE_FOLDERS: set[str] = {
+    "LatentUpscaleModelLoader",
+    "LowVRAMLatentUpscaleModelLoader",
+    "MelBandRoFormerModelLoader",
+    "LoaderGGUF",
+    "LoaderGGUFAdvanced",
+    "UnetLoaderGGUF",
+    "UnetLoaderGGUFAdvanced",
+    "CLIPLoaderGGUF",
+    "DualCLIPLoaderGGUF",
+    "TripleCLIPLoaderGGUF",
+    "QuadrupleCLIPLoaderGGUF",
+    "LTXVGemmaCLIPModelLoader",
+    "LTXAVTextEncoderLoader",
 }
 
 
@@ -547,7 +582,7 @@ def _iter_ui_widgets(node: dict) -> Iterable[tuple[str, str, str]]:
                 # Refine folder via filename-level override (e.g. a value
                 # ending in .onnx with "yolo" in it goes to ultralytics
                 # regardless of what the slot mapping said).
-                refined = _guess_folder_for_field(f"_widget[{idx}]", v) or folder
+                refined = folder if node_type in _STRICT_UI_NODE_FOLDERS else (_guess_folder_for_field(f"_widget[{idx}]", v) or folder)
                 yield f"_widget[{idx}]", v, refined
         return
 
@@ -586,7 +621,13 @@ def scan_workflow(workflow: dict) -> list[dict]:
 
     is_ui_format = "nodes" in workflow and isinstance(workflow["nodes"], list)
     if is_ui_format:
-        nodes_iter = workflow["nodes"]
+        nodes_iter = list(workflow["nodes"])
+        try:
+            for subgraph in ((workflow.get("definitions") or {}).get("subgraphs") or []):
+                if isinstance(subgraph, dict) and isinstance(subgraph.get("nodes"), list):
+                    nodes_iter.extend(subgraph["nodes"])
+        except Exception:
+            pass
     else:
         nodes_iter = []
         for n in workflow.values():
