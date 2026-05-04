@@ -814,11 +814,38 @@ function renderMissing(parent, missing, status) {
       sourceEl.append(tag, src);
     }
     const btnFind = el("button", { textContent: "Find sources" });
+    const btnWeb = el("button", { textContent: "Search web" });
+    const actions = el("div", {
+      style: {
+        marginTop: "4px",
+        display: "flex",
+        gap: "6px",
+        flexWrap: "wrap",
+      },
+    });
+    for (const b of [btnFind, btnWeb]) {
+      Object.assign(b.style, {
+        padding: "3px 8px",
+        cursor: "pointer",
+        fontSize: "12px",
+      });
+    }
+    Object.assign(btnWeb.style, {
+      background: "var(--comfy-input-bg, #333)",
+      color: "var(--input-text, #ddd)",
+      border: "1px solid var(--border-color, #555)",
+      borderRadius: "4px",
+    });
+    btnWeb.title = "Open a browser search for this exact filename. Use this to verify ambiguous sources manually.";
+    actions.append(btnFind, btnWeb);
+
+    btnWeb.onclick = () => {
+      const q = encodeURIComponent(`"${m.name}"`);
+      window.open(`https://www.google.com/search?q=${q}`, "_blank", "noopener,noreferrer");
+    };
+
     Object.assign(btnFind.style, {
       marginTop: "4px",
-      padding: "3px 8px",
-      cursor: "pointer",
-      fontSize: "12px",
     });
     const candidatesBox = el("div", { style: { marginTop: "6px", display: "none" } });
 
@@ -841,9 +868,9 @@ function renderMissing(parent, missing, status) {
     };
 
     if (sourceEl) {
-      row.append(name, meta, targetEl, sourceEl, btnFind, candidatesBox);
+      row.append(name, meta, targetEl, sourceEl, actions, candidatesBox);
     } else {
-      row.append(name, meta, targetEl, btnFind, candidatesBox);
+      row.append(name, meta, targetEl, actions, candidatesBox);
     }
     parent.append(row);
   }
