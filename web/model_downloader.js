@@ -904,6 +904,12 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         fontWeight: "bold",
       },
     });
+    downloadsTag.onmouseenter = () => {
+      downloadsTag.textContent = `${fmtCount(downloads)} downloads`;
+    };
+    downloadsTag.onmouseleave = () => {
+      downloadsTag.textContent = `${fmtCount(downloads)} DL`;
+    };
     const meta = el("div", {
       style: { fontSize: "10px", opacity: "0.7", marginTop: "2px" },
       textContent: [
