@@ -125,10 +125,26 @@ def _models_root_dirs() -> list[str]:
 def _walk_local_files(root: str, max_files: int = 50_000) -> set[str]:
     """Walk a root directory and return lowercased basenames + relative paths
     of every model-extension file found. Capped at max_files to keep the scan
-    cheap on huge model libraries."""
+    cheap on huge model libraries.
+
+    followlinks=True so that symlinked model directories (common on Linux, e.g.
+    NAS mounts) are traversed. Loop detection via inode tracking prevents
+    infinite recursion from circular symlinks.
+    """
     out: set[str] = set()
     count = 0
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+    seen_inodes: set[tuple[int, int]] = set()  # (dev, ino) pairs
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=True):
+        # Loop detection: skip directories we have already visited by inode.
+        try:
+            st = os.stat(dirpath)
+            inode_key = (st.st_dev, st.st_ino)
+            if inode_key in seen_inodes:
+                _dirnames[:] = []  # prune subtree
+                continue
+            seen_inodes.add(inode_key)
+        except OSError:
+            pass
         for fn in filenames:
             lc = fn.lower()
             if not lc.endswith(_LOCAL_INDEX_EXTS):

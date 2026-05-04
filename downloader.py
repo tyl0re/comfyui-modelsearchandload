@@ -161,21 +161,21 @@ class DownloadManager:
         # Finished/error/cancelled jobs are NOT considered active so the
         # user can retry after a failure by clicking again.
         active_states = ("queued", "connecting", "linking", "downloading")
-        target_path = os.path.normcase(os.path.abspath(os.path.join(dest_dir, filename)))
-        target_dir_n = os.path.normcase(os.path.abspath(dest_dir))
+        # Normalise paths for comparison. We use .lower() explicitly on both
+        # platforms instead of os.path.normcase, because normcase is a no-op
+        # on Linux (case-sensitive fs) but we still want case-insensitive
+        # deduplication to match ComfyUI's own loader behaviour on both
+        # Windows (NTFS) and Linux (ext4).
+        target_path = os.path.abspath(os.path.join(dest_dir, filename)).lower()
+        target_dir_n = os.path.abspath(dest_dir).lower()
         with self._lock:
             for existing in self._jobs.values():
                 if existing.status not in active_states:
                     continue
-                # Filename comparison is case-insensitive on Windows
-                # (NTFS is case-preserving but not case-sensitive) and
-                # exact on Linux. We match on the filename even with
-                # different cases on Windows because that's how ComfyUI
-                # itself behaves.
-                if os.path.normcase(existing.filename) != os.path.normcase(filename):
+                if existing.filename.lower() != filename.lower():
                     continue
-                ex_dir_n = os.path.normcase(os.path.abspath(existing.dest_dir))
-                ex_path_n = os.path.normcase(os.path.abspath(existing.dest_path))
+                ex_dir_n = os.path.abspath(existing.dest_dir).lower()
+                ex_path_n = os.path.abspath(existing.dest_path).lower()
                 if ex_dir_n == target_dir_n or ex_path_n == target_path:
                     print(f"[ModelDownloader] dedupe: '{filename}' already in flight "
                           f"(job {existing.id}, status={existing.status}); "

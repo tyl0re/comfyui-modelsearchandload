@@ -71,6 +71,28 @@ def _models_root_dirs() -> list[str]:
     return roots
 
 
+def _walk_with_symlinks(root: str):
+    """os.walk wrapper with followlinks=True and inode-based loop detection.
+
+    On Linux it is common to symlink model directories (e.g. NAS mounts) into
+    the models tree. followlinks=False would make those invisible. We follow
+    symlinks but track visited (dev, ino) pairs to avoid infinite loops from
+    circular symlinks.
+    """
+    seen_inodes: set[tuple[int, int]] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        try:
+            st = os.stat(dirpath)
+            key = (st.st_dev, st.st_ino)
+            if key in seen_inodes:
+                dirnames[:] = []
+                continue
+            seen_inodes.add(key)
+        except OSError:
+            pass
+        yield dirpath, dirnames, filenames
+
+
 def build_size_index() -> dict[tuple[str, int], list[str]]:
     """Build {(basename_lc, size_bytes): [absolute_path, ...]} index.
 
@@ -81,7 +103,7 @@ def build_size_index() -> dict[tuple[str, int], list[str]]:
     index: dict[tuple[str, int], list[str]] = {}
     count = 0
     for root in _models_root_dirs():
-        for dirpath, _dirs, files in os.walk(root, followlinks=False):
+        for dirpath, _dirs, files in _walk_with_symlinks(root):
             for fn in files:
                 lc = fn.lower()
                 if not lc.endswith(_LINK_INDEX_EXTS):
@@ -116,7 +138,7 @@ def find_existing_copy(filename: str, expected_size: Optional[int]) -> Optional[
     else:
         # No size known yet -> scan and accept any same-name file.
         for root in _models_root_dirs():
-            for dirpath, _dirs, files in os.walk(root, followlinks=False):
+            for dirpath, _dirs, files in _walk_with_symlinks(root):
                 for fn in files:
                     if fn.lower() == fn_lc:
                         candidates.append(os.path.join(dirpath, fn))

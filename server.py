@@ -176,9 +176,22 @@ def register_routes() -> None:
         except Exception:
             return web.json_response({"error": "scanner import failed"}, status=500)
 
+        # followlinks=True so symlinked model directories (common on Linux,
+        # e.g. NAS mounts) are included. Inode tracking prevents infinite
+        # loops from circular symlinks.
         basename_to_paths: dict[str, list[str]] = {}
+        _seen_inodes: set[tuple[int, int]] = set()
         for root in _models_root_dirs():
-            for dirpath, _dirs, files in os.walk(root, followlinks=False):
+            for dirpath, _dirs, files in os.walk(root, followlinks=True):
+                try:
+                    _st = os.stat(dirpath)
+                    _ikey = (_st.st_dev, _st.st_ino)
+                    if _ikey in _seen_inodes:
+                        _dirs[:] = []
+                        continue
+                    _seen_inodes.add(_ikey)
+                except OSError:
+                    pass
                 for fn in files:
                     if fn.lower().endswith(_LOCAL_INDEX_EXTS):
                         basename_to_paths.setdefault(fn.lower(), []).append(
