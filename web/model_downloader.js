@@ -746,8 +746,8 @@ function renderMissing(parent, missing, status) {
         candidatesBox.style.display = "block";
         const n = (data.candidates || []).length;
         status.textContent = n
-          ? `Web search found ${n} verified HuggingFace candidate(s).`
-          : `Web search found no verified HuggingFace source for ${m.name}.`;
+          ? `Search found ${n} verified HuggingFace candidate(s).`
+          : `Search found no verified HuggingFace source for ${m.name}.`;
       } catch (e) {
         status.textContent = "Web search failed: " + e.message;
       } finally {
@@ -846,7 +846,9 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
     // Tag the row so the poll loop can find the button and update it
     // when an unrelated UI part starts a download for the same file.
     row.setAttribute("data-md-candidate-filename", targetFilename);
-    const sourceLabel = c.web_found ? "WEB" : c.source.toUpperCase();
+    const sourceLabel = c.web_found ? "WEB"
+                      : c.hf_fallback_found ? "HF"
+                      : c.source.toUpperCase();
     const tag = el("span", {
       textContent: sourceLabel,
       style: {
@@ -915,6 +917,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       textContent: [
         c.size ? fmtBytes(c.size) : null,
         c.web_found ? "verified via web search" : null,
+        c.hf_fallback_found ? "found via HuggingFace fallback" : null,
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,

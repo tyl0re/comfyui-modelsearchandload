@@ -1099,6 +1099,23 @@ def search_web_for_huggingface(filename: str, limit: int = 8) -> list[dict]:
                     _annotate_confidence(filename, out)
                     out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
                     return out
+
+    # Search engines can miss HuggingFace pages that HF's own API finds.
+    # Rather than showing an empty result, fall back to verified exact HF
+    # candidates and label them separately in the UI.
+    if not out:
+        for cand in search_huggingface(filename):
+            if cand.get("match_type") not in ("exact", "normalized") and cand.get("_match_type") not in ("exact", "normalized"):
+                continue
+            key = (cand.get("repo") or "", cand.get("filename") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            cand["hf_fallback_found"] = True
+            out.append(cand)
+            if len(out) >= limit:
+                break
+
     _annotate_confidence(filename, out)
     out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
     return out
