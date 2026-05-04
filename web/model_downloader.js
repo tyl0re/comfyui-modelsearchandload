@@ -140,7 +140,14 @@ function buildPanel(container) {
     missingSection.innerHTML = "";
     setActionsEnabled(false);
     try {
-      const workflow = await app.graphToPrompt().then(r => r.output);
+      // Send the full UI-format workflow (app.graph.serialize()) instead of
+      // the API-format prompt (graphToPrompt().output). The API format
+      // strips bypassed/muted nodes (mode != 0) and may not expose model
+      // filenames as `inputs` on custom nodes — so model references in
+      // bypassed nodes or in widget-only slots would be invisible.
+      // The backend scanner handles both formats but UI format is strictly
+      // more complete.
+      const workflow = app.graph.serialize();
       const data = await jsonFetch(API.scan, {
         method: "POST",
         body: JSON.stringify({ workflow }),
