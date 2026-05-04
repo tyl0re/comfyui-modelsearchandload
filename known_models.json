@@ -82,6 +82,35 @@
     "_reason": "Same as lcm-lora-sdv1-5 - upstream filename is pytorch_lora_weights.safetensors."
   },
 
+  "_section_wan_animate_onnx": "ONNX detection / pose models used by Kijai's ComfyUI-WanAnimatePreprocess. The custom-node README explicitly names the canonical sources, but HF search returns dozens of small mirrors and forks first - some completely wrong (signature detectors, pineapple-yolo, etc.). These entries pin the exact upstream URLs the README points at.",
+  "vitpose-l-wholebody.onnx": {
+    "folder": "detection",
+    "url": "https://huggingface.co/JunkyByte/easy_ViTPose/resolve/main/onnx/wholebody/vitpose-l-wholebody.onnx",
+    "source": "huggingface",
+    "size": 1234419234,
+    "_reason": "ViTPose-L wholebody pose detector for Kijai's WanAnimatePreprocess (read its readme.md). HF search returns the fwwrsd/ fork above the original JunkyByte/easy_ViTPose. Both work, but the canonical author is JunkyByte; pinning it here so future fork-chains don't confuse the lookup."
+  },
+  "vitpose_h_wholebody_model.onnx": {
+    "folder": "detection",
+    "url": "https://huggingface.co/Kijai/vitpose_comfy/resolve/main/onnx/vitpose_h_wholebody_model.onnx",
+    "source": "huggingface",
+    "_reason": "ViTPose-H (huge) variant. Kijai re-exports it as a separate ONNX with the model and data files split. WanAnimatePreprocess readme points at Kijai/vitpose_comfy directly."
+  },
+  "vitpose_h_wholebody_data.bin": {
+    "folder": "detection",
+    "url": "https://huggingface.co/Kijai/vitpose_comfy/resolve/main/onnx/vitpose_h_wholebody_data.bin",
+    "source": "huggingface",
+    "_reason": "Companion binary for vitpose_h_wholebody_model.onnx - both files must be in the same folder."
+  },
+  "yolov10m.onnx": {
+    "folder": "detection",
+    "subfolder": "onnx",
+    "url": "https://huggingface.co/Wan-AI/Wan2.2-Animate-14B/resolve/main/process_checkpoint/det/yolov10m.onnx",
+    "source": "huggingface",
+    "size": 61628328,
+    "_reason": "YOLOv10-medium for face/body bbox detection used by WanAnimatePreprocess. Search top-hit is dangerously wrong: tech4humans/conditional-detr-50-signature-detector/model.safetensors (166 MB Conditional DETR signature detector - completely different model, completely different task). This entry pins the exact URL from WanAnimatePreprocess's readme. Subfolder 'onnx' matches what example workflows reference (yolov10m.onnx vs onnx\\\\yolov10m.onnx)."
+  },
+
   "_section_civitai_lykon": "Lykon's ControlNet 1.1 pack on CivitAI. CivitAI's API search doesn't return results by filename - the parent model is named 'ControlNet 1.1 Models' and the variant filenames (controlnet11Models_*.safetensors) only appear in the version metadata. The numeric URL '/api/download/models/<id>' uses opaque CivitAI database IDs (44736 etc.) that have no relation to the variant name.",
   "controlnet11Models_depth.safetensors": {
     "folder": "controlnet",
