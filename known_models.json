@@ -34,9 +34,16 @@
     "folder": "clip_vision",
     "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
     "source": "huggingface",
-    "size": 856506240,
-    "aliases": ["clip_vision_h.safetensors", "sigclip_vision_384.safetensors"],
-    "_reason": "Comfy-Org has multiple repos containing this file (sigclip_vision_384 AND newer hunyuanvideo_1.5_repackaged that bundles it as a side-file). The newer repo wins the search ranking; this entry pins the dedicated sigclip repo."
+    "size": 856505640,
+    "aliases": ["sigclip_vision_384.safetensors"],
+    "_reason": "SigLIP ViT-large patch-14 384px. Used by Wan2.2 i2v, HunyuanVideo, FluxFlow workflows. Comfy-Org has multiple repos containing this file (sigclip_vision_384 AND newer HunyuanVideo_1.5_repackaged that bundles it as a side-file). The newer repo wins the search ranking; this entry pins the dedicated sigclip repo. NOT the same model as clip_vision_h.safetensors - SigLIP is a different architecture from CLIP."
+  },
+  "clip_vision_h.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+    "source": "huggingface",
+    "size": 1264411712,
+    "_reason": "Used by Wan2.1 i2v workflows. This is OpenCLIP ViT-H/14 (laion2B-s32B-b79K) re-exported as just the vision tower in fp16, ~1.2 GB. Different from sigclip_vision_patch14_384.safetensors (used by Wan2.2 / HunyuanVideo, ~817 MB) and from h94/IP-Adapter's models/image_encoder/model.safetensors (~2.4 GB, full CLIP-ViT-H including text tower). All three were previously confused as aliases - they are three distinct models with three distinct sizes."
   },
 
   "_section_lcm_lora": "Latent-consistency LoRAs are stored upstream as 'pytorch_lora_weights.safetensors' (the diffusers convention). Filename-based HF search returns dozens of unrelated 'mylcmlora*' / SD-1.5-LCM checkpoints with the same filename. Three official LoRA repos exist (sdv1-5, sdxl, ssd-1b) and the trusted-author probe can't disambiguate which one matches our specific filename.",
