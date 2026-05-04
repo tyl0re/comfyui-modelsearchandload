@@ -894,6 +894,9 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       title: `${downloads} downloads`,
       style: {
         display: "inline-block",
+        minWidth: "82px",
+        textAlign: "center",
+        whiteSpace: "nowrap",
         padding: "1px 5px",
         marginLeft: "5px",
         borderRadius: "3px",
