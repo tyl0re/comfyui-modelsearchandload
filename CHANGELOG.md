@@ -21,7 +21,6 @@ Initial public release.
   inter-poll progress animation via `requestAnimationFrame`, rolling
   3-second speed window, ETA calculation, resume support via `.part`
   files, HTTP error / HTML detection, cancel.
-- **Download all** bulk endpoint that auto-resolves every missing file.
 - **Find sources** per-row search modal with HuggingFace / CivitAI /
   curated DB candidates.
 - **Move existing** action - relocates locally-present files with the

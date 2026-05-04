@@ -102,11 +102,8 @@ without Developer Mode → falls back to hardlink → falls back to copy).
 2. Open the **Models** sidebar tab.
 3. Click **Scan workflow** - missing models appear in a list with their
    target folder path.
-4. Either:
-   - Click **Download all** to auto-resolve every missing file at once,
-     or
-   - Click **Find sources** on a single entry, pick a candidate, and
-     hit **Download** for fine-grained control.
+4. Click **Find sources** on a single entry, review the candidates, and
+   hit **Download** on the source you want to use.
 5. Watch progress in the **Downloads** panel below. Each row shows the
    live status, percentage, speed, and ETA. Finished files animate
    away from the missing list.
@@ -174,12 +171,12 @@ external scripts can drive it too:
 |---|---|---|
 | `POST` | `/model_downloader/scan` | `{"workflow": <api-format-prompt>}` |
 | `POST` | `/model_downloader/search` | `{"filename": "...", "folder": "..."}` |
+| `POST` | `/model_downloader/web_search` | `{"filename": "...", "folder": "..."}` |
 | `POST` | `/model_downloader/download` | `{"url": "...", "folder": "...", "filename": "...", "subfolder": "...", "size": <bytes>}` |
-| `POST` | `/model_downloader/download_all` | `{"items": [{"name": "...", "folder": "...", "subfolder": "..."}, ...]}` |
 | `GET`  | `/model_downloader/jobs` | - |
 | `POST` | `/model_downloader/cancel` | `{"id": "<job-id>"}` |
 | `POST` | `/model_downloader/clear` | `{}` |
-| `POST` | `/model_downloader/relocate` | `{"items": [...]}` (same shape as `download_all`) |
+| `POST` | `/model_downloader/relocate` | `{"items": [{"name": "...", "folder": "...", "subfolder": "..."}, ...]}` |
 | `GET`  | `/model_downloader/config` | - (tokens are masked) |
 | `POST` | `/model_downloader/config` | `{"huggingface_token": "...", "civitai_token": "...", "enable_linking": true, "linking_mode": "auto"}` |
 

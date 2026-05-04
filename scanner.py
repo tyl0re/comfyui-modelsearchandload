@@ -213,7 +213,26 @@ def _is_locally_present(
     fn_lc = filename.lower()
 
     if has_subfolder:
-        # Strict relative-path match across all known sources.
+        # Strict relative-path match under the folder ComfyUI will actually
+        # query. A file at e.g. models/diffusion_models/ltx2/foo does not
+        # satisfy a workflow asking a lora loader for ltx2/foo.
+        if expected_folder:
+            bucket = index.get(expected_folder)
+            if bucket and raw_norm in bucket:
+                return True
+            if folder_paths is not None:
+                try:
+                    for d in folder_paths.get_folder_paths(expected_folder) or []:
+                        if os.path.isfile(os.path.join(d, *raw_norm.split("/"))):
+                            return True
+                except Exception:
+                    pass
+            target_dir = get_target_directory(expected_folder)
+            if target_dir and os.path.isfile(os.path.join(target_dir, *raw_norm.split("/"))):
+                return True
+            return False
+
+        # No expected folder: keep the old broad behaviour.
         for files in index.values():
             if raw_norm in files:
                 return True
@@ -265,6 +284,14 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
         return "clip_vision"
     if bn_lc.startswith("clip_l") or bn_lc.startswith("clip_g") or "t5xxl" in bn_lc or "umt5" in bn_lc:
         return "text_encoders"
+    if "gemma" in v_lc and bn_lc.startswith("model-") and bn_lc.endswith(".safetensors"):
+        return "text_encoders"
+    if "lora" in bn_lc:
+        return "loras"
+    if "vae" in bn_lc:
+        return "vae"
+    if bn_lc.startswith("ltx-2") or bn_lc.startswith("ltx2"):
+        return "diffusion_models"
 
     # Frame interpolation models live in their own folder (registered by
     # ComfyUI core: models/frame_interpolation/). FILM, RIFE, ...
