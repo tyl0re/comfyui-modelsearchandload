@@ -8,7 +8,6 @@ const API = {
   search:       "/model_downloader/search",
   web_search:   "/model_downloader/web_search",
   download:     "/model_downloader/download",
-  download_all: "/model_downloader/download_all",
   relocate:     "/model_downloader/relocate",
   jobs:         "/model_downloader/jobs",
   cancel:       "/model_downloader/cancel",
@@ -70,11 +69,10 @@ function buildPanel(container) {
   });
 
   const btnScan = el("button", { textContent: "Scan workflow" });
-  const btnDownloadAll = el("button", { textContent: "Download all" });
   const btnRelocate = el("button", { textContent: "Move existing" });
   const btnSettings = el("button", { textContent: "Settings" });
 
-  for (const b of [btnScan, btnDownloadAll, btnRelocate, btnSettings]) {
+  for (const b of [btnScan, btnRelocate, btnSettings]) {
     Object.assign(b.style, {
       padding: "5px 10px",
       cursor: "pointer",
@@ -84,20 +82,11 @@ function buildPanel(container) {
       borderRadius: "4px",
     });
   }
-  // "Download all" gets a primary-button style and is disabled until a scan
-  // produced at least one missing model.
-  Object.assign(btnDownloadAll.style, {
-    background: "#1976d2",
-    color: "#fff",
-    borderColor: "#1976d2",
-  });
-  btnDownloadAll.disabled = true;
-  btnDownloadAll.style.opacity = "0.5";
   btnRelocate.disabled = true;
   btnRelocate.style.opacity = "0.5";
   btnRelocate.title = "Move files that are already on disk into the folder ComfyUI actually expects.";
 
-  header.append(title, btnScan, btnDownloadAll, btnRelocate, btnSettings);
+  header.append(title, btnScan, btnRelocate, btnSettings);
 
   const status = el("div", {
     style: { fontSize: "12px", opacity: "0.8", minHeight: "16px" },
@@ -122,7 +111,7 @@ function buildPanel(container) {
 
   container.append(header, status, missingHeader, missingSection, jobsHeader, jobsSection);
 
-  // State shared by scan + download-all
+  // State shared by scan + per-candidate downloads
   let lastMissing = [];
 
   // Settings modal (lazy)
@@ -133,10 +122,7 @@ function buildPanel(container) {
     settingsModal.open();
   };
 
-  function setDownloadAllEnabled(enabled) {
-    btnDownloadAll.disabled = !enabled;
-    btnDownloadAll.style.opacity = enabled ? "1" : "0.5";
-    btnDownloadAll.style.cursor = enabled ? "pointer" : "not-allowed";
+  function setActionsEnabled(enabled) {
     btnRelocate.disabled = !enabled;
     btnRelocate.style.opacity = enabled ? "1" : "0.5";
     btnRelocate.style.cursor = enabled ? "pointer" : "not-allowed";
@@ -145,7 +131,7 @@ function buildPanel(container) {
   btnScan.onclick = async () => {
     status.textContent = "Scanning workflow...";
     missingSection.innerHTML = "";
-    setDownloadAllEnabled(false);
+    setActionsEnabled(false);
     try {
       const workflow = await app.graphToPrompt().then(r => r.output);
       const data = await jsonFetch(API.scan, {
@@ -158,94 +144,20 @@ function buildPanel(container) {
       status.textContent = n === 0
         ? "All referenced models are installed."
         : `${n} missing model(s) found.`;
-      setDownloadAllEnabled(n > 0);
+      setActionsEnabled(n > 0);
     } catch (e) {
       status.textContent = "Scan failed: " + e.message;
     }
   };
 
   // Map: missing-model-name -> job_id (set when we queue a download for it
-  // either via "Download all" or via the per-row "Download" button).
+  // via the per-candidate "Download" button).
   // The poll loop uses this to keep each missing row's status badge in sync
   // with the actual download job state.
   const missingNameToJobId = new Map();
   // Container is shared with the per-row Download buttons via this object,
   // so the candidate-row code can register a job_id without re-passing refs.
   container._mdLink = { missingNameToJobId, missingSection };
-
-  btnDownloadAll.onclick = async () => {
-    if (!lastMissing.length) return;
-    const ok = confirm(
-      `Auto-download ${lastMissing.length} missing model(s)?\n\n` +
-      `Only high-confidence sources are downloaded automatically. ` +
-      `Ambiguous or weak matches are skipped so you can inspect them manually.\n\n` +
-      `Gated HF models (like FLUX.1-dev) require a token in Settings.`,
-    );
-    if (!ok) return;
-
-    btnDownloadAll.disabled = true;
-    btnDownloadAll.textContent = "Queueing...";
-    status.textContent = `Resolving ${lastMissing.length} model(s)...`;
-
-    try {
-      const items = lastMissing.map(m => ({
-        name: m.name,
-        folder: m.folder,
-        subfolder: m.subfolder || "",
-        raw: m.raw || "",
-      }));
-      const data = await jsonFetch(API.download_all, {
-        method: "POST",
-        body: JSON.stringify({ items }),
-      });
-      const results = data.results || [];
-      const queued = results.filter(r => r.status === "queued");
-      const alreadyActive = results.filter(r => r.status === "already_active");
-      const noSource = results.filter(r => r.status === "no_source");
-      const ambiguous = results.filter(r => r.status === "ambiguous");
-      const lowConfidence = results.filter(r => r.status === "low_confidence");
-      const errors = results.filter(r => r.status === "error");
-
-      // Remember which missing-row corresponds to which download job.
-      // Both "queued" (fresh) and "already_active" (de-duplicated by the
-      // backend) carry a valid job_id we can attach the missing-row to.
-      for (const r of results) {
-        if ((r.status === "queued" || r.status === "already_active") && r.job_id) {
-          missingNameToJobId.set(r.name, r.job_id);
-        }
-      }
-
-      // Initial annotation; the poll loop will keep these in sync afterwards.
-      annotateMissingFromBulk(missingSection, results);
-
-      // If the bulk request hit any in-flight downloads, surface that as
-      // a toast so the user knows we didn't queue duplicates.
-      if (alreadyActive.length) {
-        const names = alreadyActive.map(r => r.name).join(", ");
-        showToast(
-          container,
-          `Skipped ${alreadyActive.length} already-running download(s): ${names}`,
-          "#ffb74d",
-          5000,
-        );
-      }
-
-      const parts = [];
-      if (queued.length) parts.push(`✓ ${queued.length} queued`);
-      if (alreadyActive.length) parts.push(`↻ ${alreadyActive.length} already running`);
-      if (noSource.length) parts.push(`⚠ ${noSource.length} no source`);
-      if (ambiguous.length) parts.push(`? ${ambiguous.length} ambiguous`);
-      if (lowConfidence.length) parts.push(`! ${lowConfidence.length} low confidence`);
-      if (errors.length) parts.push(`✗ ${errors.length} errors`);
-      status.textContent = parts.join(" · ") || "Nothing happened.";
-    } catch (e) {
-      status.textContent = "Bulk download failed: " + e.message;
-    } finally {
-      btnDownloadAll.textContent = "Download all";
-      btnDownloadAll.disabled = false;
-      btnDownloadAll.style.opacity = "1";
-    }
-  };
 
   btnRelocate.onclick = async () => {
     if (!lastMissing.length) return;
@@ -308,7 +220,7 @@ function buildPanel(container) {
         } else if (r.status === "already_correct") {
           _setBadge(badge, "✓ Already at correct path (rescan to refresh)", "#66bb6a");
         } else if (r.status === "not_found") {
-          _setBadge(badge, "Not found locally - use Download all", "#ffb74d");
+          _setBadge(badge, "Not found locally - inspect sources and download manually", "#ffb74d");
         } else if (r.status === "target_exists") {
           _setBadge(badge, "⚠ Target file already exists - skipped", "#ffb74d");
         } else if (r.status === "error") {
@@ -557,31 +469,6 @@ function _setLinkIcon(row, mode, sourcePath) {
   icon.title = sourcePath
     ? `${label}\nfrom: ${sourcePath}`
     : label;
-}
-
-// Called once right after the bulk-download POST returns. Sets the initial
-// "Queued / no source / error" badge for each missing-row.
-function annotateMissingFromBulk(parent, results) {
-  ensureJobStyles(); // we want the .md-spinner CSS available
-  const byName = new Map(results.map(r => [r.name, r]));
-  parent.querySelectorAll("[data-missing-name]").forEach(row => {
-    const r = byName.get(row.getAttribute("data-missing-name"));
-    if (!r) return;
-    const badge = _ensureBadge(row);
-    if (r.status === "queued") {
-      _setBadge(badge, `Queued (${r.source}${r.gated ? ", gated" : ""})`, "#64b5f6", true);
-    } else if (r.status === "already_active") {
-      _setBadge(badge, "↻ Already downloading", "#ffb74d", true);
-    } else if (r.status === "no_source") {
-      _setBadge(badge, "No download source found - try Find sources manually", "#ffb74d");
-    } else if (r.status === "ambiguous") {
-      _setBadge(badge, `Ambiguous source - inspect candidates manually`, "#ffb74d");
-    } else if (r.status === "low_confidence") {
-      _setBadge(badge, `Low-confidence source - skipped`, "#ffb74d");
-    } else if (r.status === "error") {
-      _setBadge(badge, "✗ " + (r.reason || "error"), "#ef9a9a");
-    }
-  });
 }
 
 // Set of (name, jobId) pairs that have already been scheduled for
@@ -1001,7 +888,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,
-        c.auto_safe ? "safe for Download all" : "manual review",
+        c.auto_safe ? "high confidence" : "manual review",
       ].filter(Boolean).join(" · "),
     });
     // Always show the full source URL as a small monospace line so the
