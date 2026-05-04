@@ -18,6 +18,7 @@ env/
 
 # Plugin runtime data — NEVER commit these
 config.json
+user_known_models.json
 *.log
 
 # Editor / OS

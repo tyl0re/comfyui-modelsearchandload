@@ -105,13 +105,15 @@ _RULES: list[dict] = [
     # -----------------------------------------------------------------
     # ControlNet v1.1 (lllyasviel) - one rule covers ALL task variants
     # -----------------------------------------------------------------
-    # The repo holds 14+ controlnets named control_v11p_sd15_<task>.pth
-    # (canny, openpose, depth, normalbae, lineart, mlsd, scribble, seg,
-    # tile, inpaint, ip2p, softedge, shuffle, ...). Captured group is
-    # substituted into the URL so a brand-new task name we have never
-    # seen will resolve correctly the day it lands in the repo.
+    # The repo holds 14+ controlnets named control_v11p_sd15_<task>.pth.
+    # Keep the task list explicit so decorative suffixes like _fp16 do
+    # not produce URLs for files that do not exist upstream.
     {
-        "pattern": re.compile(r"^control[_]?v11(?:[fp][1ep]?)?p?[_]?sd15[_]?(\w+)\.(?:pth|safetensors)$"),
+        "pattern": re.compile(
+            r"^control[_]?v11(?:[fp][1ep]?)?p?[_]?sd15[_]?"
+            r"(canny|openpose|depth|normalbae|lineart|mlsd|scribble|seg|tile|inpaint|ip2p|softedge|shuffle)"
+            r"\.(?:pth|safetensors)$"
+        ),
         "url":    "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_\\g<1>.pth",
         "folder": "controlnet",
         "source": "huggingface",

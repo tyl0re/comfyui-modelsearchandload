@@ -917,6 +917,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       style: { fontSize: "10px", opacity: "0.7", marginTop: "2px" },
       textContent: [
         c.size ? fmtBytes(c.size) : null,
+        c.downloads != null ? `${c.downloads} downloads` : null,
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,
