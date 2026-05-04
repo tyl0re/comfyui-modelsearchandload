@@ -988,12 +988,18 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       btn.disabled = true;
       btn.textContent = "Queued...";
       try {
+        // Always save the file under the name ComfyUI expects (targetFilename).
+        // The upstream file on HF/CivitAI may have a different name
+        // (e.g. diffusion_pytorch_model.safetensors vs z_image_base-bf16.safetensors).
+        // Using c.filename here would land the file under the wrong name
+        // and ComfyUI would never find it.
+        const downloadFilename = targetFilename;
         const resp = await jsonFetch(API.download, {
           method: "POST",
           body: JSON.stringify({
             url: c.url,
             folder: c.folder || folder,
-            filename: c.filename || filename,
+            filename: downloadFilename,
             requested_filename: targetFilename,
             subfolder: subfolder,
             source: c.source,
