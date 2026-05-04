@@ -63,9 +63,10 @@ def register_routes() -> None:
             return web.json_response({"error": "invalid JSON"}, status=400)
         filename = (payload.get("filename") or "").strip()
         folder_hint = payload.get("folder")
+        source_hint = payload.get("source_hint") or payload.get("raw")
         if not filename:
             return web.json_response({"error": "filename required"}, status=400)
-        candidates = find_candidates(filename, folder_hint=folder_hint)
+        candidates = find_candidates(filename, folder_hint=folder_hint, source_hint=source_hint)
         return web.json_response({"filename": filename, "candidates": candidates})
 
     @routes.post("/model_downloader/download")
@@ -239,11 +240,12 @@ def register_routes() -> None:
             name = (item.get("name") or item.get("filename") or "").strip()
             folder = item.get("folder")
             subfolder = (item.get("subfolder") or "").strip()
+            source_hint = item.get("source_hint") or item.get("raw")
             if not name:
                 results.append({"name": name, "status": "skipped", "reason": "empty filename"})
                 continue
             try:
-                candidates = find_candidates(name, folder_hint=folder)
+                candidates = find_candidates(name, folder_hint=folder, source_hint=source_hint)
             except Exception as e:
                 results.append({"name": name, "status": "error", "reason": f"search failed: {e}"})
                 continue

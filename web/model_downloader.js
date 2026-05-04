@@ -191,6 +191,7 @@ function buildPanel(container) {
         name: m.name,
         folder: m.folder,
         subfolder: m.subfolder || "",
+        raw: m.raw || "",
       }));
       const data = await jsonFetch(API.download_all, {
         method: "POST",
@@ -827,7 +828,7 @@ function renderMissing(parent, missing, status) {
       try {
         const data = await jsonFetch(API.search, {
           method: "POST",
-          body: JSON.stringify({ filename: m.name, folder: m.folder }),
+          body: JSON.stringify({ filename: m.name, folder: m.folder, source_hint: m.raw || "" }),
         });
         renderCandidates(candidatesBox, data.candidates || [], m.folder, m.name, status, m.subfolder || "");
         candidatesBox.style.display = "block";
@@ -862,6 +863,37 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
   // the candidate's own filename, because that's what the user sees in
   // the missing-list and what the download manager keys on.
   const targetFilename = filename;
+  if (candidates.some(c => c.ambiguous || c.confidence_label === "ambiguous" || c.confidence_label === "low")) {
+    const q = encodeURIComponent(`"${targetFilename}"`);
+    const webLine = el("div", {
+      style: {
+        fontSize: "11px",
+        margin: "4px 0 6px",
+        opacity: "0.85",
+        display: "flex",
+        gap: "8px",
+        flexWrap: "wrap",
+      },
+    });
+    webLine.append(
+      el("span", { textContent: "Ambiguous? Verify on web:" }),
+      el("a", {
+        textContent: "Google",
+        href: `https://www.google.com/search?q=${q}`,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        style: { color: "#64b5f6" },
+      }),
+      el("a", {
+        textContent: "DuckDuckGo",
+        href: `https://duckduckgo.com/?q=${q}`,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        style: { color: "#64b5f6" },
+      }),
+    );
+    parent.append(webLine);
+  }
   for (const c of candidates) {
     const row = el("div", {
       style: {

@@ -108,6 +108,43 @@ def _repo_id_from_candidate(c: dict) -> str:
     return ""
 
 
+def _extract_hf_path_hint(value: str | None) -> tuple[str, str] | None:
+    """Extract (repo_id, file_path) from a workflow value if it embeds one.
+
+    Accepts both full HF URLs and compact references like
+    ``Moon-jack/Democratize-CSG/checkpoints/DWPose/yolox_l.onnx``.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    v = value.strip().replace("\\", "/").strip("'\"")
+    if not v:
+        return None
+
+    if "huggingface.co/" in v:
+        try:
+            parsed = urllib.parse.urlparse(v)
+            parts = [p for p in parsed.path.split("/") if p]
+        except Exception:
+            return None
+        if len(parts) < 5:
+            return None
+        repo_id = f"{parts[0]}/{parts[1]}"
+        if parts[2] in ("resolve", "blob", "tree"):
+            file_path = "/".join(parts[4:])
+        else:
+            file_path = "/".join(parts[2:])
+    else:
+        parts = [p for p in v.lstrip("/").split("/") if p]
+        if len(parts) < 3:
+            return None
+        repo_id = f"{parts[0]}/{parts[1]}"
+        file_path = "/".join(parts[2:])
+
+    if not file_path.lower().endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".onnx", ".gguf", ".sft")):
+        return None
+    return repo_id, file_path
+
+
 def _annotate_confidence(filename: str, candidates: list[dict]) -> None:
     """Attach conservative confidence metadata used by UI and bulk download.
 
@@ -146,7 +183,10 @@ def _annotate_confidence(filename: str, candidates: list[dict]) -> None:
                 if _trusted_author(repo_id):
                     score += 35
                     reasons.append("trusted HuggingFace author")
-                if via == "fallback":
+                if via == "workflow-hint":
+                    score += 85
+                    reasons.append("workflow provided this repo/path")
+                elif via == "fallback":
                     score += 15
                     reasons.append("known umbrella repo probe")
                 elif via == "fulltext":
@@ -964,6 +1004,38 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
     return deduped
 
 
+def search_huggingface_path_hint(source_hint: str | None, filename: str) -> list[dict]:
+    """Resolve an explicit HF repo/path embedded in the workflow value."""
+    hint = _extract_hf_path_hint(source_hint)
+    if not hint:
+        return []
+    repo_id, hinted_path = hint
+    hit = _hf_find_file_in_repo(repo_id, hinted_path, accept_upstream_alias=False)
+    if not hit:
+        return []
+    file_path = hit["path"]
+    file_size = hit.get("size")
+    downloads = 0
+    gated = False
+    meta = _hf_get_repo_meta(repo_id)
+    if meta:
+        downloads = int(meta.get("downloads", 0) or 0)
+        gated = bool(meta.get("gated"))
+    return [{
+        "source": "huggingface",
+        "repo": repo_id,
+        "filename": file_path.rsplit("/", 1)[-1],
+        "title": f"{repo_id}/{file_path}",
+        "url": f"https://huggingface.co/{repo_id}/resolve/main/{urllib.parse.quote(file_path)}",
+        "size": file_size,
+        "downloads": downloads,
+        "gated": gated,
+        "_query": "(workflow path)",
+        "_via": "workflow-hint",
+        "_match_type": _filename_match_type(filename, file_path.rsplit("/", 1)[-1]),
+    }]
+
+
 # ---------- CivitAI ----------
 
 def _build_civitai_queries(filename: str) -> list[str]:
@@ -1275,7 +1347,11 @@ def _candidate_sort_key(c: dict) -> tuple:
     return (preferred, via_rank, downloads, src_rank, title)
 
 
-def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]:
+def find_candidates(
+    filename: str,
+    folder_hint: str | None = None,
+    source_hint: str | None = None,
+) -> list[dict]:
     """Return ranked download candidates for a filename, with caching.
 
     The returned list is sorted with the most-likely-correct entries
@@ -1284,7 +1360,8 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
     when downloads tie.
     """
     # Cache lookup
-    cached = _search_cache.get(filename)
+    cache_key = filename if not source_hint else f"{filename}\0{source_hint}"
+    cached = _search_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _CACHE_TTL_S:
         out = list(cached[1])
         if folder_hint:
@@ -1293,6 +1370,22 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
         return out
 
     out: list[dict] = []
+    try:
+        out.extend(search_huggingface_path_hint(source_hint, filename))
+    except Exception:
+        pass
+    if out:
+        # An explicit owner/repo/path in the workflow is stronger than a
+        # locally learned basename-only choice. Return it directly to avoid
+        # stale user_known_models.json entries masking the workflow intent.
+        if folder_hint:
+            for c in out:
+                c.setdefault("folder", folder_hint)
+        _annotate_confidence(filename, out)
+        out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
+        _search_cache[cache_key] = (time.time(), [dict(c) for c in out])
+        return out
+
     pinned = lookup_known_or_pattern(filename, folder_hint)
     if pinned:
         out.append(pinned)
@@ -1305,7 +1398,7 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
             for c in out:
                 c.setdefault("folder", folder_hint)
         _annotate_confidence(filename, out)
-        _search_cache[filename] = (time.time(), [dict(c) for c in out])
+        _search_cache[cache_key] = (time.time(), [dict(c) for c in out])
         return out
 
     try:
@@ -1325,5 +1418,5 @@ def find_candidates(filename: str, folder_hint: str | None = None) -> list[dict]
     _annotate_confidence(filename, out)
     out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
 
-    _search_cache[filename] = (time.time(), [dict(c) for c in out])
+    _search_cache[cache_key] = (time.time(), [dict(c) for c in out])
     return out
