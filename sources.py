@@ -1073,32 +1073,37 @@ def search_web_for_huggingface(filename: str, limit: int = 8) -> list[dict]:
     be verified against HuggingFace's tree API. Search ranking alone is not
     trusted for downloads.
     """
-    q = f'"{filename}" site:huggingface.co'
-    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-    except Exception:
-        return []
-
     out: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for hf_url in _extract_hf_urls_from_search_html(body):
-        for hint in (hf_url, urllib.parse.unquote(hf_url)):
-            for cand in search_huggingface_path_hint(hint, filename):
-                key = (cand.get("repo") or "", cand.get("filename") or "")
-                if key in seen:
-                    continue
-                seen.add(key)
-                cand["_via"] = "web-search"
-                cand["web_found"] = True
-                cand["web_url"] = hf_url
-                out.append(cand)
-                if len(out) >= limit:
-                    _annotate_confidence(filename, out)
-                    out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
-                    return out
+
+    queries = [
+        f'"{filename}" site:huggingface.co',
+        f'"{filename}"',
+    ]
+    for q in queries:
+        url = f"https://duckduckgo.com/html/?q={urllib.parse.quote(q)}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except Exception:
+            continue
+
+        for hf_url in _extract_hf_urls_from_search_html(body):
+            for hint in (hf_url, urllib.parse.unquote(hf_url)):
+                for cand in search_huggingface_path_hint(hint, filename):
+                    key = (cand.get("repo") or "", cand.get("filename") or "")
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    cand["_via"] = "web-search"
+                    cand["web_found"] = True
+                    cand["web_url"] = hf_url
+                    out.append(cand)
+                    if len(out) >= limit:
+                        _annotate_confidence(filename, out)
+                        out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
+                        return out
 
     # Search engines can miss HuggingFace pages that HF's own API finds.
     # Rather than showing an empty result, fall back to verified exact HF
