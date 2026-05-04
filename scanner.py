@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Iterable
 
 try:
@@ -25,7 +26,7 @@ MODEL_EXTS = (
 # (e.g. a UNet stored under "diffusion_models" but referenced via "unet_name").
 _ALL_FOLDER_KEYS = [
     "checkpoints", "loras", "vae", "controlnet", "clip", "clip_vision",
-    "unet", "diffusion_models", "upscale_models", "embeddings",
+    "unet", "diffusion_models", "text_encoders", "upscale_models", "embeddings",
     "style_models", "ipadapter", "gligen", "hypernetworks",
     "vae_approx", "photomaker", "instantid", "insightface",
     "latent_upscale_models", "clip_gguf", "model_gguf", "vae_gguf",
@@ -288,6 +289,12 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
         return "text_encoders"
     if "gemma" in v_lc and bn_lc.startswith("model-") and bn_lc.endswith(".safetensors"):
         return "text_encoders"
+    # HuggingFace sharded model files: model-00001-of-00002.safetensors etc.
+    # These are always multi-file LLM/VLM weights that live in text_encoders
+    # (e.g. Qwen-VL, Gemma, Llama variants used by caption nodes).
+    # Pattern: model-DDDDD-of-DDDDD.safetensors
+    if re.match(r"model-\d+-of-\d+\.safetensors$", bn_lc):
+        return "text_encoders"
     if "lora" in bn_lc:
         return "loras"
     if "vae" in bn_lc:
@@ -521,8 +528,21 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "ADE_LoadAnimateDiffModel":          [(0, "animatediff_models")],
     "ADE_LoadAnimateLCMI2VModel":        [(0, "animatediff_models")],
     "ADE_AnimateDiffLoRALoader":         [(0, "animatediff_motion_lora")],
-    "AnimateDiffLoaderV1":                [(0, "animatediff_models")],
-    "AnimateDiffModuleLoader":            [(0, "animatediff_models")],
+    "AnimateDiffLoaderV1":               [(0, "animatediff_models")],
+    "AnimateDiffModuleLoader":           [(0, "animatediff_models")],
+    # ComfyUI_QwenVL_PromptCaption: Qwen2.5-VL / Qwen3-VL / Qwen3.5-VL caption nodes.
+    # All variants use folder_paths.get_filename_list("text_encoders") for slot 0.
+    # The model is a full HF-style directory (model-00001-of-NNNNN.safetensors etc.)
+    # so the file must live inside a subfolder of models/text_encoders/.
+    "Qwen25Caption":      [(0, "text_encoders")],
+    "Qwen25CaptionBatch": [(0, "text_encoders")],
+    "Qwen3Caption":       [(0, "text_encoders")],
+    "Qwen3CaptionBatch":  [(0, "text_encoders")],
+    "Qwen35Caption":      [(0, "text_encoders")],
+    "Qwen35CaptionBatch": [(0, "text_encoders")],
+    # Other VL caption nodes that follow the same pattern
+    "Ovis25Run":          [(0, "text_encoders")],
+    "ASID_Caption":       [(0, "text_encoders")],
 }
 
 _STRICT_UI_NODE_FOLDERS: set[str] = {
