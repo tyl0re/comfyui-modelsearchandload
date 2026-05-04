@@ -32,6 +32,13 @@ function fmtBytes(n) {
   return `${n.toFixed(1)} ${u[i]}`;
 }
 
+function fmtCount(n) {
+  n = Number(n || 0);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return String(n);
+}
+
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
   Object.assign(node, props);
@@ -879,11 +886,28 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         fontWeight: "bold",
       },
     });
+    const downloads = Number(c.downloads || 0);
+    const downloadsTag = el("span", {
+      textContent: `${fmtCount(downloads)} DL`,
+      title: `${downloads} downloads`,
+      style: {
+        display: "inline-block",
+        padding: "1px 5px",
+        marginLeft: "5px",
+        borderRadius: "3px",
+        background: downloads >= 100000 ? "#42a5f5"
+                  : downloads >= 10000 ? "#64b5f6"
+                  : downloads > 0 ? "#90a4ae"
+                  : "#616161",
+        color: "#fff",
+        fontSize: "10px",
+        fontWeight: "bold",
+      },
+    });
     const meta = el("div", {
       style: { fontSize: "10px", opacity: "0.7", marginTop: "2px" },
       textContent: [
         c.size ? fmtBytes(c.size) : null,
-        c.downloads != null ? `${c.downloads} downloads` : null,
         c.web_found ? "verified via web search" : null,
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
@@ -1011,7 +1035,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         btn.textContent = "Download";
       }
     };
-    row.append(tag, title, confidenceTag, meta, sourceLine, btn);
+    row.append(tag, title, confidenceTag, downloadsTag, meta, sourceLine, btn);
     parent.append(row);
   }
 }
