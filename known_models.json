@@ -111,6 +111,69 @@
     "_reason": "YOLOv10-medium for face/body bbox detection used by WanAnimatePreprocess. Search top-hit is dangerously wrong: tech4humans/conditional-detr-50-signature-detector/model.safetensors (166 MB Conditional DETR signature detector - completely different model, completely different task). This entry pins the exact URL from WanAnimatePreprocess's readme. Subfolder 'onnx' matches what example workflows reference (yolov10m.onnx vs onnx\\\\yolov10m.onnx)."
   },
 
+  "_section_upscalers_misc": "Other upscalers / ControlNet checkpoints where HF search either returns dangerously-wrong fulltext alias hits or canonical-but-uncanonical mirrors.",
+  "4x_NMKD-Superscale-SP_178000_G.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/uwg/upscaler/resolve/main/ESRGAN/4x_NMKD-Superscale-SP_178000_G.pth",
+    "source": "huggingface",
+    "size": 67040989,
+    "aliases": ["4xNMKD-Superscale-SP_178000_G.pth", "NMKD-Superscale-SP_178000_G.pth"],
+    "_reason": "HF search top-hit is the safety_checker pytorch_model.bin from SG161222/Realistic_Vision_V6 (1.16 GB) due to a misleading fulltext-alias match. The actual NMKD upscaler is 64 MB and lives in uwg/upscaler/ESRGAN/."
+  },
+  "OpenPoseXL2.safetensors": {
+    "folder": "controlnet",
+    "url": "https://huggingface.co/thibaud/controlnet-openpose-sdxl-1.0/resolve/main/OpenPoseXL2.safetensors",
+    "source": "huggingface",
+    "size": 5004167248,
+    "_reason": "ControlNet OpenPose for SDXL by thibaud. HF search returns danaidesign/comfyui mirror at the top - same file content but not canonical. This entry pins thibaud's official repo."
+  },
+  "Flux.1-dev-Controlnet-Upscaler.safetensors": {
+    "folder": "controlnet",
+    "url": "https://huggingface.co/jasperai/Flux.1-dev-Controlnet-Upscaler/resolve/main/diffusion_pytorch_model.safetensors",
+    "source": "huggingface",
+    "size": 3582793040,
+    "aliases": [
+      "Flux.1-dev-Controlnet-Upscaler1.safetensors",
+      "flux1-dev-controlnet-upscaler.safetensors",
+      "Flux.1-dev-ControlNet-Upscaler.safetensors"
+    ],
+    "_reason": "jasperai's Flux ControlNet Upscaler. The repo's actual filename is the diffusers convention 'diffusion_pytorch_model.safetensors'; users save it under various names matching the repo title. HF search returns mirrors from Virtuos-rnd / others first."
+  },
+
+  "_section_wan_rcm_loras": "Kijai's WanVideo_comfy hosts a folder LoRAs/rCM/ with these. They are findable via the fallback-repo probe but pinning them avoids the 12+ second tree walk on every search.",
+  "Wan22-I2V-A14B-LOW-rCM1_0_lora_rank_64_bf16.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/LoRAs/rCM/Wan22-I2V-A14B-LOW-rCM1_0_lora_rank_64_bf16.safetensors",
+    "source": "huggingface",
+    "size": 630697104,
+    "_reason": "Kijai's rCM-distilled LoRA for Wan2.2 i2v low-noise expert. HF search picks up the wrong tech-dev-ai vae (484 MB) via fulltext alias matching; this entry pins the canonical 601 MB file in Kijai/WanVideo_comfy/LoRAs/rCM/."
+  },
+  "Wan22-I2V-A14B-HIGH-rCM6_0_lora_rank_64_bf16.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/LoRAs/rCM/Wan22-I2V-A14B-HIGH-rCM6_0_lora_rank_64_bf16.safetensors",
+    "source": "huggingface",
+    "size": 630697104,
+    "_reason": "HIGH-noise companion of Wan22-I2V-A14B-LOW-rCM1 - same situation, same Kijai repo."
+  },
+
+  "_section_civitai_old_models": "Older CivitAI models that the API's filename-based search cannot reach because the model name on CivitAI has been updated to a newer version number (e.g. realisticVisionV20_v20NoVAE.safetensors comes from model id 4201 which is now named 'Realistic Vision V6.0 B1') or because the file lives only as a sub-version on a parent model.",
+  "realisticVisionV20_v20NoVAE.safetensors": {
+    "folder": "checkpoints",
+    "url": "https://civitai.com/api/download/models/29460",
+    "source": "civitai",
+    "size": 2132791808,
+    "needs_token": true,
+    "_reason": "Realistic Vision V2.0 (noVAE). On CivitAI the parent model #4201 is now named 'Realistic Vision V6.0 B1' so search by query 'realisticVision V2.0' / 'realisticVisionV20' returns the wrong version entirely. Version 29460 is the V2.0 noVAE entry; HF search for the literal filename returns SG161222's safety_checker pytorch_model.bin which is a side-file inside an unrelated repo."
+  },
+  "color101VAE_v1.safetensors": {
+    "folder": "vae",
+    "url": "https://civitai.com/api/download/models/83798",
+    "source": "civitai",
+    "size": 334641174,
+    "needs_token": true,
+    "_reason": "Color101 VAE on CivitAI #70248. CivitAI search by query 'color101VAE' / 'color101' returns 0 items (works only via tag-pagination of types=VAE). HF search returns Yntec/REV/text_encoder/model.safetensors via misleading fulltext match."
+  },
+
   "_section_civitai_lykon": "Lykon's ControlNet 1.1 pack on CivitAI. CivitAI's API search doesn't return results by filename - the parent model is named 'ControlNet 1.1 Models' and the variant filenames (controlnet11Models_*.safetensors) only appear in the version metadata. The numeric URL '/api/download/models/<id>' uses opaque CivitAI database IDs (44736 etc.) that have no relation to the variant name.",
   "controlnet11Models_depth.safetensors": {
     "folder": "controlnet",
