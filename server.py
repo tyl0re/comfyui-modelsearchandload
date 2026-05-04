@@ -34,6 +34,25 @@ def register_routes() -> None:
             return web.json_response({"error": "invalid JSON"}, status=400)
         workflow = payload.get("workflow") or payload
         missing = scan_workflow(workflow)
+        # Augment each missing entry with a quick source-URL hint when
+        # the curated DB or pattern engine knows the file. This is done
+        # synchronously and instantly (no network calls) so the user
+        # sees 'comes from huggingface.co/...' right after Scan workflow.
+        # Remote search (HF / CivitAI) is still deferred to 'Find sources'
+        # on demand because it costs several seconds per file.
+        try:
+            from .sources import lookup_known_or_pattern
+        except Exception:
+            lookup_known_or_pattern = None
+        if lookup_known_or_pattern is not None:
+            for m in missing:
+                try:
+                    pinned = lookup_known_or_pattern(m["name"], m.get("folder"))
+                except Exception:
+                    pinned = None
+                if pinned:
+                    m["source_url"] = pinned.get("url")
+                    m["source_kind"] = pinned.get("_via") or pinned.get("source")
         return web.json_response({"missing": missing})
 
     @routes.post("/model_downloader/search")

@@ -759,6 +759,51 @@ function renderMissing(parent, missing, status) {
       },
       title: "Where the file will be saved on disk. If this looks wrong, the download will land in the wrong place — please report it.",
     });
+    // If the curated DB or pattern engine already resolved a source
+    // URL during scan, show it inline so the user can see at a glance
+    // WHERE the file would be downloaded from before clicking
+    // 'Find sources'. Suppressed when the source is unknown - in that
+    // case 'Find sources' will fetch candidates on demand.
+    let sourceEl = null;
+    if (m.source_url) {
+      sourceEl = el("div", {
+        style: {
+          fontSize: "10px",
+          opacity: "0.85",
+          marginTop: "2px",
+          fontFamily: "ui-monospace, Consolas, Menlo, monospace",
+          wordBreak: "break-all",
+        },
+      });
+      const kind = m.source_kind || "?";
+      const tag = el("span", {
+        textContent: kind === "known" ? "DB"
+                   : kind === "pattern" ? "PATTERN"
+                   : kind.toUpperCase(),
+        style: {
+          display: "inline-block",
+          marginRight: "5px",
+          padding: "0 4px",
+          borderRadius: "2px",
+          background: "#4caf50",
+          color: "#000",
+          fontSize: "9px",
+          fontWeight: "bold",
+        },
+      });
+      const src = el("a", {
+        textContent: "↓ " + m.source_url,
+        href: m.source_url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        style: {
+          color: "var(--input-text, #aaa)",
+          textDecoration: "none",
+        },
+        title: "Click to verify this URL in a new browser tab before downloading.",
+      });
+      sourceEl.append(tag, src);
+    }
     const btnFind = el("button", { textContent: "Find sources" });
     Object.assign(btnFind.style, {
       marginTop: "4px",
@@ -786,7 +831,11 @@ function renderMissing(parent, missing, status) {
       }
     };
 
-    row.append(name, meta, targetEl, btnFind, candidatesBox);
+    if (sourceEl) {
+      row.append(name, meta, targetEl, sourceEl, btnFind, candidatesBox);
+    } else {
+      row.append(name, meta, targetEl, btnFind, candidatesBox);
+    }
     parent.append(row);
   }
 }
@@ -842,6 +891,31 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         c.needs_token ? "may require CivitAI token" : null,
       ].filter(Boolean).join(" · "),
     });
+    // Always show the full source URL as a small monospace line so the
+    // user can verify exactly which repo the file is downloaded from
+    // before clicking Download. Click the link to open it in a new tab
+    // for manual verification.
+    const sourceLine = el("div", {
+      style: {
+        fontSize: "10px",
+        marginTop: "2px",
+        opacity: "0.85",
+        fontFamily: "ui-monospace, Consolas, Menlo, monospace",
+        wordBreak: "break-all",
+      },
+    });
+    const sourceLink = el("a", {
+      textContent: c.url || "(no URL)",
+      href: c.url || "#",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      style: {
+        color: "var(--input-text, #aaa)",
+        textDecoration: "none",
+      },
+      title: "Click to open the source URL in a new browser tab.",
+    });
+    sourceLine.appendChild(sourceLink);
     const btn = el("button", {
       textContent: "Download",
       style: {
@@ -934,7 +1008,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
         btn.textContent = "Download";
       }
     };
-    row.append(tag, title, meta, btn);
+    row.append(tag, title, meta, sourceLine, btn);
     parent.append(row);
   }
 }

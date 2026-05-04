@@ -111,6 +111,29 @@
     "_reason": "YOLOv10-medium for face/body bbox detection used by WanAnimatePreprocess. Search top-hit is dangerously wrong: tech4humans/conditional-detr-50-signature-detector/model.safetensors (166 MB Conditional DETR signature detector - completely different model, completely different task). This entry pins the exact URL from WanAnimatePreprocess's readme. Subfolder 'onnx' matches what example workflows reference (yolov10m.onnx vs onnx\\\\yolov10m.onnx)."
   },
 
+  "_section_upscalers_canonical": "Common upscalers - having them in the DB means the source URL appears in the scan result immediately, no 'Find sources' click needed.",
+  "RealESRGAN_x4plus_anime_6B.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/gemasai/RealESRGAN_x4plus_anime_6B/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
+    "source": "huggingface",
+    "size": 17938799,
+    "_reason": "RealESRGAN x4plus anime variant. The original xinntao/Real-ESRGAN repo doesn't have this file in HF; gemasai is the canonical mirror."
+  },
+  "RealESRGAN_x4plus.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRGAN_x4plus.pth",
+    "source": "huggingface",
+    "size": 67040989,
+    "_reason": "RealESRGAN x4plus (general purpose). Multiple HF mirrors exist; lllyasviel/Annotators has it as a side-file."
+  },
+  "GFPGANv1.4.pth": {
+    "folder": "upscale_models",
+    "url": "https://huggingface.co/Mumzkid04/GFPGANv1.4/resolve/main/GFPGANv1.4.pth",
+    "source": "huggingface",
+    "size": 348632874,
+    "_reason": "GFPGAN face restoration v1.4. The TencentARC/GFPGAN repo is gated; Mumzkid04 hosts a public mirror."
+  },
+
   "_section_upscalers_misc": "Other upscalers / ControlNet checkpoints where HF search either returns dangerously-wrong fulltext alias hits or canonical-but-uncanonical mirrors.",
   "4x_NMKD-Superscale-SP_178000_G.pth": {
     "folder": "upscale_models",
