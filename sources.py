@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 import urllib.error
+import html as _html
 import json as _json
 from typing import Any
 
@@ -192,6 +193,9 @@ def _annotate_confidence(filename: str, candidates: list[dict]) -> None:
                 elif via == "fulltext":
                     score += 8
                     reasons.append("README/full-text hit")
+                elif via == "web-search":
+                    score += 28
+                    reasons.append("found by web search and verified on HuggingFace")
                 elif via == "search":
                     score += 3
                 if c.get("_alias_match"):
@@ -1034,6 +1038,70 @@ def search_huggingface_path_hint(source_hint: str | None, filename: str) -> list
         "_via": "workflow-hint",
         "_match_type": _filename_match_type(filename, file_path.rsplit("/", 1)[-1]),
     }]
+
+
+def _extract_hf_urls_from_search_html(body: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def add(url: str):
+        url = _html.unescape(url)
+        parsed = urllib.parse.urlparse(url)
+        if "duckduckgo.com" in parsed.netloc:
+            qs = urllib.parse.parse_qs(parsed.query)
+            if qs.get("uddg"):
+                url = qs["uddg"][0]
+                parsed = urllib.parse.urlparse(url)
+        if "huggingface.co" not in parsed.netloc:
+            return
+        if url in seen:
+            return
+        seen.add(url)
+        urls.append(url)
+
+    for m in re.finditer(r"https?://[^\s\"'<>]+", body):
+        add(m.group(0))
+    for m in re.finditer(r"uddg=([^&\"'<>]+)", body):
+        add(urllib.parse.unquote(m.group(1)))
+    return urls
+
+
+def search_web_for_huggingface(filename: str, limit: int = 8) -> list[dict]:
+    """Search the web for exact filename mentions and verify HF paths.
+
+    This intentionally only emits candidates where the resulting HF URL can
+    be verified against HuggingFace's tree API. Search ranking alone is not
+    trusted for downloads.
+    """
+    q = f'"{filename}" site:huggingface.co'
+    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote(q)}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for hf_url in _extract_hf_urls_from_search_html(body):
+        for hint in (hf_url, urllib.parse.unquote(hf_url)):
+            for cand in search_huggingface_path_hint(hint, filename):
+                key = (cand.get("repo") or "", cand.get("filename") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                cand["_via"] = "web-search"
+                cand["web_found"] = True
+                cand["web_url"] = hf_url
+                out.append(cand)
+                if len(out) >= limit:
+                    _annotate_confidence(filename, out)
+                    out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
+                    return out
+    _annotate_confidence(filename, out)
+    out.sort(key=lambda c: (-int(c.get("confidence") or 0), _candidate_sort_key(c)))
+    return out
 
 
 # ---------- CivitAI ----------

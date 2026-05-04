@@ -6,6 +6,7 @@ import { app } from "../../scripts/app.js";
 const API = {
   scan:         "/model_downloader/scan",
   search:       "/model_downloader/search",
+  web_search:   "/model_downloader/web_search",
   download:     "/model_downloader/download",
   download_all: "/model_downloader/download_all",
   relocate:     "/model_downloader/relocate",
@@ -836,12 +837,29 @@ function renderMissing(parent, missing, status) {
       border: "1px solid var(--border-color, #555)",
       borderRadius: "4px",
     });
-    btnWeb.title = "Open a browser search for this exact filename. Use this to verify ambiguous sources manually.";
+    btnWeb.title = "Search the web for exact filename mentions, verify HuggingFace hits, and show them as WEB candidates.";
     actions.append(btnFind, btnWeb);
 
-    btnWeb.onclick = () => {
-      const q = encodeURIComponent(`"${m.name}"`);
-      window.open(`https://www.google.com/search?q=${q}`, "_blank", "noopener,noreferrer");
+    btnWeb.onclick = async () => {
+      btnWeb.disabled = true;
+      btnWeb.textContent = "Checking web...";
+      try {
+        const data = await jsonFetch(API.web_search, {
+          method: "POST",
+          body: JSON.stringify({ filename: m.name, folder: m.folder }),
+        });
+        renderCandidates(candidatesBox, data.candidates || [], m.folder, m.name, status, m.subfolder || "");
+        candidatesBox.style.display = "block";
+        const n = (data.candidates || []).length;
+        status.textContent = n
+          ? `Web search found ${n} verified HuggingFace candidate(s).`
+          : `Web search found no verified HuggingFace source for ${m.name}.`;
+      } catch (e) {
+        status.textContent = "Web search failed: " + e.message;
+      } finally {
+        btnWeb.disabled = false;
+        btnWeb.textContent = "Search web";
+      }
     };
 
     Object.assign(btnFind.style, {
@@ -934,17 +952,19 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
     // Tag the row so the poll loop can find the button and update it
     // when an unrelated UI part starts a download for the same file.
     row.setAttribute("data-md-candidate-filename", targetFilename);
+    const sourceLabel = c.web_found ? "WEB" : c.source.toUpperCase();
     const tag = el("span", {
-      textContent: c.source.toUpperCase(),
+      textContent: sourceLabel,
       style: {
         display: "inline-block",
         padding: "1px 5px",
         marginRight: "5px",
         borderRadius: "3px",
-        background: c.source === "huggingface" ? "#ffc107"
+        background: c.web_found ? "#9c27b0"
+                  : c.source === "huggingface" ? "#ffc107"
                   : c.source === "civitai" ? "#1976d2"
                   : "#4caf50",
-        color: "#000",
+        color: c.web_found ? "#fff" : "#000",
         fontSize: "10px",
         fontWeight: "bold",
       },
@@ -977,6 +997,7 @@ function renderCandidates(parent, candidates, folder, filename, status, subfolde
       textContent: [
         c.size ? fmtBytes(c.size) : null,
         c.downloads != null ? `${c.downloads} downloads` : null,
+        c.web_found ? "verified via web search" : null,
         c.match_type ? `match: ${c.match_type}` : null,
         c.gated ? "gated (HF token required)" : null,
         c.needs_token ? "may require CivitAI token" : null,

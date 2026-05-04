@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover
     PromptServer = None
 
 from .scanner import scan_workflow
-from .sources import find_candidates
+from .sources import find_candidates, search_web_for_huggingface
 from .downloader import manager
 from .config import load_config, save_config, DEFAULT_CONFIG, save_user_known_model
 
@@ -67,6 +67,22 @@ def register_routes() -> None:
         if not filename:
             return web.json_response({"error": "filename required"}, status=400)
         candidates = find_candidates(filename, folder_hint=folder_hint, source_hint=source_hint)
+        return web.json_response({"filename": filename, "candidates": candidates})
+
+    @routes.post("/model_downloader/web_search")
+    async def _web_search(request: web.Request):
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        filename = (payload.get("filename") or "").strip()
+        folder_hint = payload.get("folder")
+        if not filename:
+            return web.json_response({"error": "filename required"}, status=400)
+        candidates = search_web_for_huggingface(filename)
+        if folder_hint:
+            for c in candidates:
+                c.setdefault("folder", folder_hint)
         return web.json_response({"filename": filename, "candidates": candidates})
 
     @routes.post("/model_downloader/download")
