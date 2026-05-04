@@ -29,6 +29,7 @@ _ALL_FOLDER_KEYS = [
     "unet", "diffusion_models", "text_encoders", "upscale_models", "embeddings",
     "style_models", "ipadapter", "gligen", "hypernetworks",
     "vae_approx", "photomaker", "instantid", "insightface",
+    "facerestore_models", "reactor",
     "latent_upscale_models", "clip_gguf", "model_gguf", "vae_gguf",
     "audio_encoders", "encoder_gguf",
 ]
@@ -403,6 +404,9 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
             return "rembg"
         if "insightface" in bn_lc or "antelope" in bn_lc or "buffalo" in bn_lc:
             return "insightface"
+        # ReActor face swap model (inswapper_128.onnx, reswapper_*.onnx)
+        if "inswapper" in bn_lc or "reswapper" in bn_lc:
+            return "insightface"
         if "sam_" in bn_lc or "sam2" in bn_lc or "mobile_sam" in bn_lc:
             return "sams"
         return "onnx"  # generic fallback
@@ -559,6 +563,23 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     # Other VL caption nodes that follow the same pattern
     "Ovis25Run":          [(0, "text_encoders")],
     "ASID_Caption":       [(0, "text_encoders")],
+    # comfyui-reactor: face swap / restore nodes.
+    # ReActorFaceSwap (class reactor): widgets = [enabled, swap_model, facedetection,
+    #   face_restore_model, face_restore_visibility, codeformer_weight, ...]
+    #   slot 1 = swap model (inswapper_128.onnx) -> insightface folder
+    #   slot 3 = face restore model (GFPGANv1.4.pth etc.) -> facerestore_models
+    "ReActorFaceSwap":          [(1, "insightface"), (3, "facerestore_models")],
+    # ReActorFaceSwapOpt has the same layout
+    "ReActorFaceSwapOpt":       [(1, "insightface"), (3, "facerestore_models")],
+    # ReActorFaceBoost: widgets = [enabled, boost_model, interpolation, ...]
+    #   slot 1 = face restore model -> facerestore_models
+    "ReActorFaceBoost":         [(1, "facerestore_models")],
+    # ReActorRestoreFace / Advanced: widgets = [facedetection, model, ...]
+    #   slot 1 = face restore model -> facerestore_models
+    "ReActorRestoreFace":         [(1, "facerestore_models")],
+    "ReActorRestoreFaceAdvanced": [(1, "facerestore_models")],
+    # ReActorLoadFaceModel: slot 0 = saved face model (.safetensors) -> reactor folder
+    "ReActorLoadFaceModel":       [(0, "reactor")],
 }
 
 _STRICT_UI_NODE_FOLDERS: set[str] = {
