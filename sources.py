@@ -280,8 +280,14 @@ def lookup_known(filename: str) -> dict | None:
     db = load_known_models()
     user_db = load_user_known_models()
     if user_db:
-        merged = dict(db)
-        merged.update(user_db)
+        # Curated DB takes precedence over user_known_models.json. The
+        # curated entries are hand-checked; the user file is auto-learned
+        # from past downloads which can be wrong (e.g. an early version of
+        # the scanner that mis-routed a file to 'checkpoints' would also
+        # save the learned entry with folder='checkpoints'). When a key
+        # exists in BOTH, prefer the curated value.
+        merged = dict(user_db)
+        merged.update(db)  # curated overrides user_db
         db = merged
     if not db:
         return None

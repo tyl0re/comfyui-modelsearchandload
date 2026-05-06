@@ -231,19 +231,83 @@
     "_reason": "Same as controlnet11Models_depth - opaque CivitAI version-id."
   },
 
+  "_section_wan21_kijai": "Kijai/WanVideo_comfy mirrors the Wan2.1 / Wan2.2 model files used by ComfyUI-WanVideoWrapper. HF search picks the wrong repo (WanVideoWrapper repo without weights, or random fp8 mirrors) because the files are flat in the repo root and the underscore vs dot tokenisation breaks the filename match. Pin the canonical Kijai repo here.",
+  "Wan2_1-T2V-1_3B_bf16.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1-T2V-1_3B_bf16.safetensors",
+    "source": "huggingface",
+    "size": 2874796712,
+    "_reason": "Wan2.1 T2V 1.3B base model in bf16. Kijai/WanVideo_comfy is the canonical mirror used by ComfyUI-WanVideoWrapper."
+  },
+  "Wan2_1-T2V-1_3B_fp8_e4m3fn.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1-T2V-1_3B_fp8_e4m3fn.safetensors",
+    "source": "huggingface",
+    "size": 1474162024,
+    "_reason": "Wan2.1 T2V 1.3B in fp8 quant; same repo as bf16."
+  },
+  "Wan2_1_VAE_bf16.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors",
+    "source": "huggingface",
+    "size": 253806278,
+    "_reason": "Wan2.1 VAE in bf16. Same repo."
+  },
+  "Wan2_1_VAE_fp32.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_fp32.safetensors",
+    "source": "huggingface",
+    "size": 507591244,
+    "_reason": "Wan2.1 VAE in fp32. Same repo."
+  },
+  "Wan2_2_VAE_bf16.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_2_VAE_bf16.safetensors",
+    "source": "huggingface",
+    "size": 1409401152,
+    "_reason": "Wan2.2 VAE in bf16."
+  },
+  "umt5-xxl-enc-bf16.safetensors": {
+    "folder": "text_encoders",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/umt5-xxl-enc-bf16.safetensors",
+    "source": "huggingface",
+    "size": 11361845464,
+    "_reason": "umT5-XXL encoder used as T5 text encoder by ComfyUI-WanVideoWrapper. Same repo."
+  },
+  "umt5-xxl-enc-fp8_e4m3fn.safetensors": {
+    "folder": "text_encoders",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/umt5-xxl-enc-fp8_e4m3fn.safetensors",
+    "source": "huggingface",
+    "size": 6731333792,
+    "_reason": "umT5-XXL encoder in fp8."
+  },
+  "open-clip-xlm-roberta-large-vit-huge-14_visual_fp16.safetensors": {
+    "folder": "clip_vision",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/open-clip-xlm-roberta-large-vit-huge-14_visual_fp16.safetensors",
+    "source": "huggingface",
+    "size": 1264195610,
+    "_reason": "CLIP vision encoder used by Wan i2v workflows."
+  },
+
   "_section_wan21_control_loras": "spacepxl/Wan2.1-control-loras hosts depth and tile control LoRAs for Wan2.1 1.3b. The HF tokenizer splits 'wan2.1' into 'wan2 1' and the files live in nested subfolders (1.3b/tile/, 1.3b/depth/) - the regular search returns unrelated full-text hits.",
   "wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors": {
     "folder": "loras",
     "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors",
     "source": "huggingface",
     "size": 378400000,
-    "_reason": "Subfolder 1.3b/tile/ inside spacepxl/Wan2.1-control-loras. HF search splits 'wan2.1' on the dot and never returns this repo in the top hits."
+    "aliases": [
+      "视频转视频控制_wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors"
+    ],
+    "_reason": "Subfolder 1.3b/tile/ inside spacepxl/Wan2.1-control-loras. HF search splits 'wan2.1' on the dot and never returns this repo in the top hits. Some Chinese-language workflows prefix the file with '视频转视频控制_' (= 'video-to-video control_') - alias covers that."
   },
   "wan2.1-1.3b-control-lora-tile-v1.0_comfy.safetensors": {
     "folder": "loras",
     "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v1.0_comfy.safetensors",
     "source": "huggingface",
     "size": 378400000,
+    "aliases": [
+      "视频转视频控制_wan2.1-1.3b-control-lora-tile-v1.0_comfy.safetensors"
+    ],
     "_reason": "Same repo as v0.2; v1.0 is the stable release."
   },
   "wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors": {
@@ -251,6 +315,9 @@
     "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors",
     "source": "huggingface",
     "size": 378400000,
+    "aliases": [
+      "视频转视频控制_wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors"
+    ],
     "_reason": "Same repo as v0.2; v1.1 is the latest tile control LoRA."
   },
   "wan2.1-1.3b-control-lora-depth-v0.1_comfy.safetensors": {
@@ -258,6 +325,9 @@
     "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/depth/wan2.1-1.3b-control-lora-depth-v0.1_comfy.safetensors",
     "source": "huggingface",
     "size": 378400000,
+    "aliases": [
+      "视频转视频控制_wan2.1-1.3b-control-lora-depth-v0.1_comfy.safetensors"
+    ],
     "_reason": "Subfolder 1.3b/depth/ inside spacepxl/Wan2.1-control-loras."
   }
 }

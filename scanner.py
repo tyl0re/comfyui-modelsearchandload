@@ -580,6 +580,17 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "ReActorRestoreFaceAdvanced": [(1, "facerestore_models")],
     # ReActorLoadFaceModel: slot 0 = saved face model (.safetensors) -> reactor folder
     "ReActorLoadFaceModel":       [(0, "reactor")],
+    # ComfyUI-WanVideoWrapper (Kijai): WanVideo model loader nodes.
+    # All slot-0 widgets hold a model filename. The Wrapper uses ComfyUI's
+    # standard folders: diffusion_models, vae, loras, text_encoders.
+    "WanVideoModelLoader":        [(0, "diffusion_models")],
+    "WanVideoVAELoader":          [(0, "vae")],
+    "WanVideoLoraSelect":         [(0, "loras")],
+    "WanVideoLoraSelectByName":   [(0, "loras")],
+    # WanVideoLoraSelectMulti: up to 4 lora slots (lora_1..lora_4 in widgets)
+    "WanVideoLoraSelectMulti":    [(0, "loras"), (2, "loras"), (4, "loras"), (6, "loras")],
+    "LoadWanVideoT5TextEncoder":  [(0, "text_encoders")],
+    "LoadWanVideoClipTextEncoder":[(0, "clip_vision")],
 }
 
 _STRICT_UI_NODE_FOLDERS: set[str] = {
