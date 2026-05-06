@@ -229,5 +229,35 @@
     "size": 722601034,
     "needs_token": true,
     "_reason": "Same as controlnet11Models_depth - opaque CivitAI version-id."
+  },
+
+  "_section_wan21_control_loras": "spacepxl/Wan2.1-control-loras hosts depth and tile control LoRAs for Wan2.1 1.3b. The HF tokenizer splits 'wan2.1' into 'wan2 1' and the files live in nested subfolders (1.3b/tile/, 1.3b/depth/) - the regular search returns unrelated full-text hits.",
+  "wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors",
+    "source": "huggingface",
+    "size": 378400000,
+    "_reason": "Subfolder 1.3b/tile/ inside spacepxl/Wan2.1-control-loras. HF search splits 'wan2.1' on the dot and never returns this repo in the top hits."
+  },
+  "wan2.1-1.3b-control-lora-tile-v1.0_comfy.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v1.0_comfy.safetensors",
+    "source": "huggingface",
+    "size": 378400000,
+    "_reason": "Same repo as v0.2; v1.0 is the stable release."
+  },
+  "wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors",
+    "source": "huggingface",
+    "size": 378400000,
+    "_reason": "Same repo as v0.2; v1.1 is the latest tile control LoRA."
+  },
+  "wan2.1-1.3b-control-lora-depth-v0.1_comfy.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/depth/wan2.1-1.3b-control-lora-depth-v0.1_comfy.safetensors",
+    "source": "huggingface",
+    "size": 378400000,
+    "_reason": "Subfolder 1.3b/depth/ inside spacepxl/Wan2.1-control-loras."
   }
 }

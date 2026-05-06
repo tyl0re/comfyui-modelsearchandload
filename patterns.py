@@ -148,6 +148,26 @@ _RULES: list[dict] = [
         "title":  "depth-anything/Depth-Anything-V2-\\g<1>",
         "_size_map": {"vitl": "Large", "vitb": "Base", "vits": "Small"},
     },
+
+    # -----------------------------------------------------------------
+    # Wan2.1 control LoRAs - spacepxl/Wan2.1-control-loras
+    # -----------------------------------------------------------------
+    # Files live in nested subfolders: 1.3b/<task>/wan2.1-1.3b-control-lora-
+    # <task>-v<X.Y>_comfy.safetensors. HF search splits 'wan2.1' on the dot
+    # so the regular search never returns this repo. Tasks released so far:
+    # tile (v0.2/v1.0/v1.1), depth (v0.1). Pattern catches future versions.
+    # normalise_filename converts dots to _ inside numbers? No - dots are
+    # left alone. So we match the literal filename here.
+    {
+        "pattern": re.compile(
+            r"^wan2\.1[_]?1\.3b[_]?control[_]?lora[_]?(tile|depth)[_]?v(\d+\.\d+)[_]?comfy\.safetensors$"
+        ),
+        "url":    "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/\\g<1>/wan2.1-1.3b-control-lora-\\g<1>-v\\g<2>_comfy.safetensors",
+        "folder": "loras",
+        "source": "huggingface",
+        "size":   378400000,
+        "title":  "spacepxl/Wan2.1-control-loras 1.3b/\\g<1> v\\g<2>",
+    },
 ]
 
 
