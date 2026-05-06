@@ -327,6 +327,38 @@ def lookup_known(filename: str) -> dict | None:
     return None
 
 
+def _enrich_with_repo_meta(entry: dict) -> dict:
+    """If the entry's URL points at a HuggingFace repo, fetch the repo
+    metadata and fill in `downloads` / `gated` so the UI can show real
+    numbers instead of always reporting 0 for curated/pattern entries.
+    Best-effort: silently ignored on network failure."""
+    url = entry.get("url") or ""
+    if "huggingface.co" not in url:
+        return entry
+    # Already enriched? Skip.
+    if entry.get("downloads") and entry["downloads"] > 0:
+        return entry
+    try:
+        # Extract owner/repo from URL like
+        # https://huggingface.co/<owner>/<repo>/resolve/<ref>/<path>
+        m = re.match(r"https?://huggingface\.co/([^/]+)/([^/]+)(?:/resolve/|/blob/|/tree/|$)", url)
+        if not m:
+            return entry
+        repo_id = f"{m.group(1)}/{m.group(2)}"
+        meta = _hf_get_repo_meta(repo_id)
+        if not meta:
+            return entry
+        entry["downloads"] = int(meta.get("downloads") or 0)
+        # Don't override gated if curated entry explicitly set it
+        if not entry.get("gated"):
+            entry["gated"] = bool(meta.get("gated"))
+        # Helpful for UI: surface the canonical repo name
+        entry.setdefault("repo", repo_id)
+    except Exception:
+        pass
+    return entry
+
+
 def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> dict | None:
     """Combined lookup: curated DB first, then pattern rules.
 
@@ -336,7 +368,7 @@ def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> di
     # 1. Curated DB - hand-picked, always wins
     known = lookup_known(filename)
     if known:
-        return {
+        entry = {
             "source":   known.get("source", "known"),
             "title":    known.get("title", filename),
             "filename": filename,
@@ -348,12 +380,13 @@ def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> di
             "downloads": known.get("downloads", 0),
             "_via":     "known",
         }
+        return _enrich_with_repo_meta(entry)
     # 2. Pattern rules - generic, covers families of filenames
     pat = lookup_pattern(filename)
     if pat:
         if folder_hint and not pat.get("folder"):
             pat["folder"] = folder_hint
-        return pat
+        return _enrich_with_repo_meta(pat)
     return None
 
 
