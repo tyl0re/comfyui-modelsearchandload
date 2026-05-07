@@ -571,6 +571,14 @@ def register_routes() -> None:
                 total_freed += keep_size
                 success_count += 1
 
+        # Flush any cache mutations from the per-file _dc.remove() calls
+        # so the next page reload sees a clean cache without stale entries.
+        try:
+            from . import dedupe_cache as _dc
+            _dc.flush()
+        except Exception:
+            pass
+
         return web.json_response({
             "results": results,
             "linked_count": success_count,

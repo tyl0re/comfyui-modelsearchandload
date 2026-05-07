@@ -2295,9 +2295,14 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
     style: { fontSize: "12px", opacity: "0.85" },
   });
   const help = el("div", {
-    textContent: "For each group, pick which copy to KEEP. The other copies will be deleted and replaced with hardlinks pointing at the keeper. The data on disk is identical so no workflow will break.",
     style: { fontSize: "11px", opacity: "0.7", lineHeight: "1.4" },
   });
+  help.innerHTML =
+    "For each file decide its action: " +
+    "<b style='color:#66bb6a'>KEEP</b> = master copy (one per group), " +
+    "<b style='color:#64b5f6'>LINK</b> = delete and replace with a hardlink to the keeper, " +
+    "<b style='color:#bdbdbd'>LEAVE</b> = ignore this file, don't touch it. " +
+    "The data on disk after linking is bit-identical, so no workflow will break.";
 
   // Scrollable list
   const list = el("div", {
@@ -2311,16 +2316,40 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
     },
   });
 
-  // Per-group state. groupState[i] = { keepIdx: number, paths: string[], hash, size, name }
-  const groupState = groups.map((g, gi) => ({
-    keepIdx: 0,  // default: first path
+  // Per-group state. groupState[i] = {
+  //   paths: string[], actions: ("keep"|"link"|"leave")[], hash, size, name
+  // }
+  // Default: first path = keep, all others = link. Matches the old
+  // behaviour. The user can flip any path to "leave" at will.
+  const groupState = groups.map((g) => ({
     paths: g.paths,
+    actions: g.paths.map((_, i) => i === 0 ? "keep" : "link"),
     hash: g.hash,
     size: g.size,
     name: g.name,
     saving: g.saving_bytes,
   }));
 
+  // Action metadata used to render the per-row badge.
+  const ACTION_META = {
+    keep:  { label: "KEEP",  bg: "#2e7d32", color: "#fff" },
+    link:  { label: "LINK",  bg: "#1976d2", color: "#fff" },
+    leave: { label: "LEAVE", bg: "#616161", color: "#fff" },
+  };
+
+  // Forward-declare the apply button so updateTotal() can toggle its
+  // enabled state. We attach the actual onclick later.
+  const btnApply = el("button", {
+    textContent: "Apply (replace LINK rows with hardlinks)",
+    style: {
+      padding: "6px 14px", cursor: "pointer",
+      background: "#1976d2", border: "none",
+      color: "#fff", borderRadius: "4px", fontWeight: "bold",
+    },
+  });
+
+  // Build the rendered groups. Each path gets a 3-state cycle button.
+  const groupRenderers = [];
   for (let gi = 0; gi < groupState.length; gi++) {
     const g = groupState[gi];
     const groupBox = el("div", {
@@ -2339,70 +2368,103 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
     groupHeader.append(
       el("span", { textContent: g.name,
         style: { fontWeight: "bold", fontFamily: "ui-monospace, monospace" } }),
-      el("span", { textContent: `${fmtBytes(g.size)} × ${g.paths.length} = ` +
-                                 `${fmtBytes(g.saving)} saved`,
+      el("span", { textContent: `${fmtBytes(g.size)} × ${g.paths.length}`,
         style: { fontSize: "11px", opacity: "0.85" } }),
-      el("span", { textContent: `sha256: ${g.hash.slice(0, 12)}...`,
-        style: { fontSize: "10px", opacity: "0.55", fontFamily: "ui-monospace, monospace" } }),
     );
-    groupBox.appendChild(groupHeader);
+    if (g.hash) {
+      groupHeader.appendChild(
+        el("span", { textContent: `sha256: ${g.hash.slice(0, 12)}...`,
+          style: { fontSize: "10px", opacity: "0.55",
+                   fontFamily: "ui-monospace, monospace" } }),
+      );
+    }
+    // Per-group warning line for invalid configurations (shown by validate()).
+    const warnLine = el("div", {
+      style: { fontSize: "10px", color: "#ef9a9a", marginTop: "2px",
+               minHeight: "12px" },
+    });
+    groupBox.append(groupHeader, warnLine);
 
-    const radioName = `dedupe-group-${gi}`;
+    const rowEls = [];
     g.paths.forEach((p, pi) => {
-      const row = el("label", {
+      const row = el("div", {
         style: {
           display: "flex", gap: "6px", alignItems: "center",
           padding: "3px 6px",
           fontFamily: "ui-monospace, monospace",
           fontSize: "11px",
-          cursor: "pointer",
           borderRadius: "3px",
         },
       });
-      const radio = el("input", {
-        type: "radio",
-        name: radioName,
-        value: String(pi),
-        checked: pi === 0,
-      });
-      radio.onchange = () => {
-        if (radio.checked) {
-          g.keepIdx = pi;
-          updateRowStyles();
-          updateTotal();
-        }
-      };
-      const tag = el("span", {
-        textContent: pi === 0 ? "KEEP" : "→ link",
+      const actionBtn = el("button", {
         style: {
-          minWidth: "44px",
-          padding: "1px 5px",
-          textAlign: "center",
-          fontSize: "9px",
+          minWidth: "60px",
+          padding: "2px 6px",
+          fontSize: "10px",
           fontWeight: "bold",
           borderRadius: "3px",
-          background: pi === 0 ? "#2e7d32" : "#1976d2",
+          border: "none",
+          cursor: "pointer",
           color: "#fff",
         },
       });
-      row.dataset.pi = String(pi);
-      row.dataset.tagEl = "1";
-      const pathSpan = el("span", { textContent: p, style: { wordBreak: "break-all", flex: "1" } });
-      row.append(radio, tag, pathSpan);
-      groupBox.appendChild(row);
-
-      function updateRowStyles() {
-        const rows = groupBox.querySelectorAll("label");
-        rows.forEach((r, ri) => {
-          const isKeep = ri === g.keepIdx;
-          const t = r.querySelector("span"); // tag
-          if (t) {
-            t.textContent = isKeep ? "KEEP" : "→ link";
-            t.style.background = isKeep ? "#2e7d32" : "#1976d2";
+      actionBtn.title = "Click to cycle: KEEP -> LINK -> LEAVE";
+      // Cycle on click. Order: keep -> link -> leave -> keep ...
+      actionBtn.onclick = () => {
+        const cur = g.actions[pi];
+        let next;
+        if (cur === "keep") next = "link";
+        else if (cur === "link") next = "leave";
+        else next = "keep";
+        // Enforce: only one keep per group. If the user picks keep here,
+        // demote any other keep to link.
+        if (next === "keep") {
+          for (let i = 0; i < g.actions.length; i++) {
+            if (i !== pi && g.actions[i] === "keep") {
+              g.actions[i] = "link";
+            }
           }
-        });
-      }
+        }
+        g.actions[pi] = next;
+        renderRows();
+        updateTotal();
+      };
+      const pathSpan = el("span", {
+        textContent: p,
+        style: { wordBreak: "break-all", flex: "1" },
+      });
+      row.append(actionBtn, pathSpan);
+      rowEls.push({ row, actionBtn, pathSpan });
+      groupBox.appendChild(row);
     });
+
+    function renderRows() {
+      // Update each row's badge + bg from the current action state and
+      // recompute the warning line.
+      rowEls.forEach((r, pi) => {
+        const a = g.actions[pi];
+        const meta = ACTION_META[a] || ACTION_META.leave;
+        r.actionBtn.textContent = meta.label;
+        r.actionBtn.style.background = meta.bg;
+        r.actionBtn.style.color = meta.color;
+        // Greyed text for LEAVE rows so the user can spot active vs ignored.
+        r.pathSpan.style.opacity = (a === "leave") ? "0.5" : "1";
+        r.pathSpan.style.textDecoration = (a === "leave") ? "line-through" : "none";
+      });
+      // Validation: check group state and surface a warning if needed.
+      const keeps = g.actions.filter(a => a === "keep").length;
+      const links = g.actions.filter(a => a === "link").length;
+      let warn = "";
+      if (links > 0 && keeps === 0) {
+        warn = "⚠ At least one file must be marked KEEP if any are set to LINK.";
+      } else if (keeps > 1) {
+        warn = "⚠ Only one file per group can be KEEP.";
+      }
+      warnLine.textContent = warn;
+    }
+    renderRows();
+    groupRenderers.push({ render: renderRows });
+
     list.appendChild(groupBox);
   }
 
@@ -2415,12 +2477,37 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
   });
   function updateTotal() {
     let saving = 0;
+    let hasInvalid = false;
     for (const g of groupState) {
-      saving += g.size * (g.paths.length - 1);
+      const keeps = g.actions.filter(a => a === "keep").length;
+      const links = g.actions.filter(a => a === "link").length;
+      if ((links > 0 && keeps === 0) || keeps > 1) {
+        hasInvalid = true;
+        continue;
+      }
+      // Each LINK in a valid group reclaims `size` bytes.
+      saving += g.size * links;
     }
-    totalEl.textContent = `Will free ~${fmtBytes(saving)}`;
+    if (hasInvalid) {
+      totalEl.textContent = "⚠ Some groups have invalid action combinations - fix to enable Apply.";
+      totalEl.style.color = "#ef9a9a";
+      btnApply.disabled = true;
+      btnApply.style.opacity = "0.5";
+      btnApply.style.cursor = "not-allowed";
+    } else if (saving === 0) {
+      totalEl.textContent = "Nothing to do (no LINK rows selected).";
+      totalEl.style.color = "#bdbdbd";
+      btnApply.disabled = true;
+      btnApply.style.opacity = "0.5";
+      btnApply.style.cursor = "not-allowed";
+    } else {
+      totalEl.textContent = `Will free ~${fmtBytes(saving)}`;
+      totalEl.style.color = "#66bb6a";
+      btnApply.disabled = false;
+      btnApply.style.opacity = "1";
+      btnApply.style.cursor = "pointer";
+    }
   }
-  updateTotal();
 
   const btnCancel = el("button", {
     textContent: "Cancel",
@@ -2432,33 +2519,39 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
   });
   btnCancel.onclick = () => overlay.remove();
 
-  const btnApply = el("button", {
-    textContent: "Apply (replace duplicates with hardlinks)",
-    style: {
-      padding: "6px 14px", cursor: "pointer",
-      background: "#1976d2", border: "none",
-      color: "#fff", borderRadius: "4px", fontWeight: "bold",
-    },
-  });
   btnApply.onclick = async () => {
+    // Build payload: only groups that have at least one KEEP and one LINK
+    // produce a server request. LEAVE rows are simply omitted from the
+    // remove list. Groups where everything is LEAVE skip entirely.
+    const reqGroups = [];
+    let totalLinks = 0;
+    for (const g of groupState) {
+      const keepIdx = g.actions.indexOf("keep");
+      if (keepIdx === -1) continue;
+      const removePaths = [];
+      g.actions.forEach((a, i) => {
+        if (a === "link") removePaths.push(g.paths[i]);
+      });
+      if (removePaths.length === 0) continue;
+      reqGroups.push({ keep: g.paths[keepIdx], remove: removePaths });
+      totalLinks += removePaths.length;
+    }
+    if (reqGroups.length === 0) {
+      alert("Nothing to do - no LINK rows selected.");
+      return;
+    }
     const ok = confirm(
-      "About to delete every duplicate file and replace it with a hardlink.\n\n" +
-      "This is reversible only by re-downloading the file. Proceed?"
+      `About to delete ${totalLinks} duplicate file(s) and replace each with a hardlink.\n\n` +
+      `This is reversible only by re-downloading the file(s). Proceed?`
     );
     if (!ok) return;
     btnApply.disabled = true;
     btnApply.textContent = "Working...";
 
-    const payload = {
-      groups: groupState.map(g => ({
-        keep: g.paths[g.keepIdx],
-        remove: g.paths.filter((_, i) => i !== g.keepIdx),
-      })),
-    };
     try {
       const res = await jsonFetch(API.dedupe_apply, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ groups: reqGroups }),
       });
       const linked = res.linked_count || 0;
       const freed = res.freed_bytes || 0;
@@ -2477,11 +2570,14 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
     } catch (e) {
       alert("Dedupe apply failed: " + e.message);
       btnApply.disabled = false;
-      btnApply.textContent = "Apply (replace duplicates with hardlinks)";
+      btnApply.textContent = "Apply (replace LINK rows with hardlinks)";
     }
   };
 
   footer.append(totalEl, btnCancel, btnApply);
+
+  // Initial total update so the button starts in the correct enabled state.
+  updateTotal();
 
   box.append(title, summary, help, list, footer);
   overlay.appendChild(box);
