@@ -259,22 +259,48 @@ def _is_locally_present(
         return False
 
     if expected_folder:
-        # 1. Bucket keyed by ComfyUI's folder name. Source 1 of the
-        #    index only contains files folder_paths surfaces for that
-        #    folder (limited by supported_pt_extensions).
-        bucket = index.get(expected_folder)
-        if bucket and fn_lc in bucket:
-            return True
-        # 2. Direct filesystem probe of the registered ComfyUI folder
-        #    paths for this key. Catches files that folder_paths
-        #    doesn't list because of extension filtering (.onnx etc.).
+        # 1. Direct filesystem probe of the registered ComfyUI folder
+        #    paths for this key. ComfyUI's loaders look up the EXACT
+        #    string from the workflow against folder_paths.get_full_path.
+        #    A bare filename "foo.safetensors" only matches a file
+        #    physically at "<folder>/foo.safetensors", NOT at
+        #    "<folder>/sub/foo.safetensors". Putting this check first
+        #    ensures we agree with ComfyUI's loader behaviour.
         if folder_paths is not None:
+            try:
+                # Prefer the canonical resolver - it's exactly what
+                # ComfyUI will use when the loader looks up the value.
+                if folder_paths.get_full_path(expected_folder, filename):
+                    return True
+            except Exception:
+                pass
             try:
                 for d in folder_paths.get_folder_paths(expected_folder) or []:
                     if os.path.isfile(os.path.join(d, filename)):
                         return True
             except Exception:
                 pass
+        # 2. Bucket-only lookup as a last resort (e.g. when folder_paths
+        #    doesn't list the extension we are looking for, like .onnx).
+        #    We only accept bucket matches here if the indexed key is
+        #    EXACTLY the bare filename - a subfolder-qualified entry
+        #    in the bucket means the loader won't find it via the bare
+        #    name from the workflow.
+        bucket = index.get(expected_folder)
+        if bucket and fn_lc in bucket:
+            # Verify the bucket entry isn't only present as a
+            # subfolder-qualified path. A bucket can contain BOTH
+            # "sub/foo.safetensors" and "foo.safetensors" (we add the
+            # basename in _build_local_index), but if ONLY the
+            # subfolder-qualified entry exists then the loader won't
+            # find a bare reference.
+            for d in (folder_paths.get_folder_paths(expected_folder) or []) if folder_paths else []:
+                if os.path.isfile(os.path.join(d, filename)):
+                    return True
+            # Bucket has the basename but no actual file at that bare
+            # path -> ComfyUI's loader will fail to resolve it. Treat
+            # as missing so the user gets a usable hint.
+            return False
         # 3. The expected folder may be a logical name we map to a
         #    custom-node-internal directory (e.g. 'controlnet_aux' ->
         #    custom_nodes/comfyui_controlnet_aux/ckpts). Probe that
