@@ -289,6 +289,29 @@
     "_reason": "CLIP vision encoder used by Wan i2v workflows."
   },
 
+  "_section_flashvsr": "FlashVSR is a video super-resolution / detail-recovery model based on Wan2.1-1.3B, hosted in Kijai/WanVideo_comfy/FlashVSR/. The WanVideoWrapper plugin has native support via WanVideoAddFlashVSRInput and WanVideoFlashVSRDecoderLoader nodes. Files: main fp32 model (5.7GB) for diffusion_models, TCDecoder (181MB) for vae, optional LQ_proj weights.",
+  "Wan2_1-T2V-1_3B_FlashVSR_fp32.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/FlashVSR/Wan2_1-T2V-1_3B_FlashVSR_fp32.safetensors",
+    "source": "huggingface",
+    "size": 5676070392,
+    "_reason": "FlashVSR main model - Wan2.1 1.3B fine-tuned for video super-resolution. Use in WanVideoModelLoader."
+  },
+  "Wan2_1_FlashVSR_TCDecoder_fp32.safetensors": {
+    "folder": "vae",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/FlashVSR/Wan2_1_FlashVSR_TCDecoder_fp32.safetensors",
+    "source": "huggingface",
+    "size": 181359756,
+    "_reason": "FlashVSR temporal-consistent decoder. Loaded via WanVideoFlashVSRDecoderLoader from the vae folder."
+  },
+  "Wan2_1_FlashVSR_LQ_proj_model_bf16.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/FlashVSR/Wan2_1_FlashVSR_LQ_proj_model_bf16.safetensors",
+    "source": "huggingface",
+    "size": 575692608,
+    "_reason": "FlashVSR LQ projection model. Standalone variant - usually integrated in the main fp32 file."
+  },
+
   "_section_wan21_control_loras": "spacepxl/Wan2.1-control-loras hosts depth and tile control LoRAs for Wan2.1 1.3b. The HF tokenizer splits 'wan2.1' into 'wan2 1' and the files live in nested subfolders (1.3b/tile/, 1.3b/depth/) - the regular search returns unrelated full-text hits.",
   "wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors": {
     "folder": "loras",
