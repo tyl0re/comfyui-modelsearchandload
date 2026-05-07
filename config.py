@@ -43,6 +43,21 @@ DEFAULT_CONFIG = {
     # file is replaced with a hardlink. Only takes effect when
     # `enable_linking` is also True.
     "auto_dedupe_after_download": True,
+    # Additional model search paths. Useful when you have a second
+    # ComfyUI installation, an external drive of models, or a
+    # standalone "extra_models" tree you want to consider for
+    # link/dedupe purposes. Each entry is an absolute path; the
+    # directory is walked recursively (subfolders included). Files
+    # found here will:
+    #  - Be visible to the local-presence check (so a workflow's
+    #    model is considered "installed" if it exists in any extra
+    #    path, not just the main models/ folder).
+    #  - Be candidates for the linker when satisfying a download
+    #    request (saves bandwidth + disk space).
+    #  - Show up in dedupe_scan results.
+    # Cross-drive linking falls back to symlinks because hardlinks
+    # cannot cross filesystems on any OS.
+    "extra_model_paths": [],
 }
 
 

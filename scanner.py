@@ -69,6 +69,8 @@ def _models_root_dirs() -> list[str]:
       - `custom_nodes/<pack>/ckpts/` and similar local cache folders
         used by some custom-node packs (notably comfyui_controlnet_aux,
         which keeps its annotator checkpoints inside its own folder).
+      - Any user-configured paths from config.json -> extra_model_paths.
+        Useful for second ComfyUI installations or shared model drives.
     """
     roots: list[str] = []
     seen: set[str] = set()
@@ -120,6 +122,20 @@ def _models_root_dirs() -> list[str]:
                             add(os.path.join(pack_dir, cache_name))
         except Exception:
             pass
+
+    # User-configured extra paths (e.g. second ComfyUI installation).
+    # Loaded lazily inside the function to avoid an import cycle at
+    # module load time (config.py is small but keeping the dependency
+    # graph one-way is cleaner).
+    try:
+        from .config import load_config
+        cfg = load_config()
+        for p in (cfg.get("extra_model_paths") or []):
+            if isinstance(p, str) and p.strip():
+                add(p.strip())
+    except Exception:
+        pass
+
     return roots
 
 

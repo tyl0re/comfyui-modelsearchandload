@@ -11,6 +11,7 @@ const API = {
   relocate:     "/model_downloader/relocate",
   dedupe_scan:  "/model_downloader/dedupe_scan",
   dedupe_apply: "/model_downloader/dedupe_apply",
+  check_path:   "/model_downloader/check_path",
   jobs:         "/model_downloader/jobs",
   cancel:       "/model_downloader/cancel",
   clear:        "/model_downloader/clear",
@@ -1507,6 +1508,9 @@ function buildSettingsModal() {
       padding: "20px",
       borderRadius: "8px",
       minWidth: "380px",
+      width: "min(560px, 92vw)",
+      maxHeight: "88vh",
+      overflowY: "auto",
       boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
       fontFamily: "sans-serif",
     },
@@ -1625,6 +1629,145 @@ function buildSettingsModal() {
     style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginLeft: "22px" },
   });
 
+  // Extra model paths section
+  const sep2 = el("hr", {
+    style: { margin: "16px 0 10px", border: "none", borderTop: "1px solid #444" },
+  });
+  const extraHeader = el("div", {
+    textContent: "Extra model search paths",
+    style: { fontWeight: "bold", marginBottom: "6px" },
+  });
+  const extraNote = el("div", {
+    textContent: "Additional folders to scan for existing model files. Useful when you have a second ComfyUI installation, an external models drive, or a shared models tree. Paths are walked recursively. Files found here will be considered for linking and dedupe just like the main models/ folder.",
+    style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginBottom: "8px" },
+  });
+
+  // Container that holds one row per existing path + an empty add row.
+  const extraList = el("div", {
+    style: { display: "flex", flexDirection: "column", gap: "4px" },
+  });
+  const extraAddRow = el("div", {
+    style: { display: "flex", gap: "6px", alignItems: "center", marginTop: "6px" },
+  });
+  const extraAddInput = el("input", {
+    type: "text",
+    placeholder: "C:\\Other\\ComfyUI\\models",
+    style: { flex: "1", padding: "5px", boxSizing: "border-box",
+             fontFamily: "monospace", fontSize: "12px",
+             background: "var(--comfy-input-bg, #333)",
+             color: "var(--input-text, #ddd)",
+             border: "1px solid var(--border-color, #555)",
+             borderRadius: "3px" },
+  });
+  const extraAddBtn = el("button", {
+    textContent: "Add",
+    style: { padding: "5px 12px", cursor: "pointer", fontSize: "12px" },
+  });
+  const extraValidationMsg = el("div", {
+    style: { fontSize: "11px", marginTop: "2px", minHeight: "14px" },
+  });
+
+  // In-memory state for extra paths. Synced from /config on open and
+  // saved on Save click. Each entry is { path: string, status?: 'ok'|'warn'|'err',
+  // info?: string }.
+  let extraPaths = [];
+
+  function renderExtraPaths() {
+    extraList.innerHTML = "";
+    if (extraPaths.length === 0) {
+      const empty = el("div", {
+        textContent: "(none configured)",
+        style: { fontSize: "11px", opacity: "0.6", fontStyle: "italic", padding: "2px 0" },
+      });
+      extraList.appendChild(empty);
+      return;
+    }
+    extraPaths.forEach((entry, i) => {
+      const row = el("div", {
+        style: { display: "flex", gap: "6px", alignItems: "center",
+                 padding: "3px 0", fontFamily: "monospace", fontSize: "12px" },
+      });
+      // Status badge
+      let badgeColor = "#90a4ae", badgeText = "?";
+      if (entry.status === "ok") { badgeColor = "#66bb6a"; badgeText = "OK"; }
+      else if (entry.status === "warn") { badgeColor = "#ffb74d"; badgeText = "!"; }
+      else if (entry.status === "err") { badgeColor = "#ef5350"; badgeText = "X"; }
+      const badge = el("span", {
+        textContent: badgeText,
+        title: entry.info || "",
+        style: { display: "inline-block", minWidth: "22px", textAlign: "center",
+                 padding: "1px 4px", borderRadius: "3px",
+                 background: badgeColor, color: "#000", fontSize: "10px",
+                 fontWeight: "bold", flexShrink: "0" },
+      });
+      const text = el("span", {
+        textContent: entry.path,
+        style: { flex: "1", wordBreak: "break-all" },
+      });
+      const removeBtn = el("button", {
+        textContent: "Remove",
+        style: { padding: "2px 8px", fontSize: "10px", cursor: "pointer",
+                 background: "transparent", border: "1px solid #555",
+                 color: "#bbb", borderRadius: "3px" },
+      });
+      removeBtn.onclick = () => {
+        extraPaths.splice(i, 1);
+        renderExtraPaths();
+      };
+      row.append(badge, text, removeBtn);
+      extraList.appendChild(row);
+    });
+  }
+
+  async function validatePath(p) {
+    try {
+      const data = await jsonFetch(API.check_path, {
+        method: "POST",
+        body: JSON.stringify({ path: p }),
+      });
+      if (!data.exists) {
+        return { status: "err", info: "Path does not exist" };
+      }
+      if (!data.is_dir) {
+        return { status: "err", info: "Not a directory" };
+      }
+      return { status: "ok",
+               info: `${data.file_count} top-level entr${data.file_count === 1 ? "y" : "ies"}` };
+    } catch (e) {
+      return { status: "warn", info: "Validation failed: " + e.message };
+    }
+  }
+
+  extraAddBtn.onclick = async () => {
+    const raw = (extraAddInput.value || "").trim();
+    if (!raw) return;
+    // Reject duplicates
+    if (extraPaths.some(e => e.path.toLowerCase() === raw.toLowerCase())) {
+      extraValidationMsg.textContent = "Already in the list.";
+      extraValidationMsg.style.color = "#ffb74d";
+      return;
+    }
+    extraValidationMsg.textContent = "Checking...";
+    extraValidationMsg.style.color = "#bbb";
+    const v = await validatePath(raw);
+    extraPaths.push({ path: raw, status: v.status, info: v.info });
+    extraAddInput.value = "";
+    extraValidationMsg.textContent = v.status === "ok"
+      ? `Added: ${v.info}`
+      : `Added (warning): ${v.info}`;
+    extraValidationMsg.style.color = v.status === "ok" ? "#66bb6a" : "#ffb74d";
+    renderExtraPaths();
+  };
+  // Pressing Enter in the input also triggers Add.
+  extraAddInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      extraAddBtn.click();
+    }
+  });
+
+  extraAddRow.append(extraAddInput, extraAddBtn);
+
   const flash = el("div", {
     style: {
       fontSize: "12px",
@@ -1664,6 +1807,7 @@ function buildSettingsModal() {
     note,
     sep, linkHeader, linkToggleRow, linkModeRow, linkNote,
     dedupeRow, autoDedupeRow, dedupeNote,
+    sep2, extraHeader, extraNote, extraList, extraAddRow, extraValidationMsg,
     flash, btnRow,
   );
   overlay.append(box);
@@ -1721,6 +1865,24 @@ function buildSettingsModal() {
       const dopts = Array.from(dedupeMode.options).map(o => o.value);
       dedupeMode.value = dopts.includes(dedupe) ? dedupe : "hash";
       autoDedupeToggle.checked = cfg.auto_dedupe_after_download !== false; // default true
+      // Extra paths: revalidate each one in the background so the user
+      // sees broken paths flagged. We render synchronously first with
+      // an "?" status, then update as results come in.
+      const incoming = Array.isArray(cfg.extra_model_paths) ? cfg.extra_model_paths : [];
+      extraPaths = incoming.filter(p => typeof p === "string" && p.trim())
+                            .map(p => ({ path: p, status: undefined, info: "" }));
+      renderExtraPaths();
+      // Validate in parallel; refresh the row each time one completes.
+      extraPaths.forEach((entry, i) => {
+        validatePath(entry.path).then(v => {
+          // Make sure entry index is still valid (user might have removed)
+          if (extraPaths[i] && extraPaths[i].path === entry.path) {
+            extraPaths[i].status = v.status;
+            extraPaths[i].info = v.info;
+            renderExtraPaths();
+          }
+        });
+      });
       syncLinkUI();
       return cfg;
     } catch (e) {
@@ -1752,6 +1914,7 @@ function buildSettingsModal() {
         linking_mode: linkMode.value,
         dedupe_method: dedupeMode.value,
         auto_dedupe_after_download: autoDedupeToggle.checked,
+        extra_model_paths: extraPaths.map(e => e.path),
       };
       const resp = await jsonFetch(API.config, {
         method: "POST",

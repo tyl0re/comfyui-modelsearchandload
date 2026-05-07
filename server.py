@@ -529,6 +529,47 @@ def register_routes() -> None:
             "freed_bytes": total_freed,
         })
 
+    @routes.post("/model_downloader/check_path")
+    async def _check_path(request: web.Request):
+        """Cheap path-existence probe used by the Settings UI when the
+        user adds an extra_model_paths entry. Returns whether the path
+        exists, is a directory, and a rough file count for the user
+        feedback line.
+
+        Body: { "path": "C:/Other/ComfyUI/models" }
+        """
+        import os
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        path = (payload.get("path") or "").strip()
+        if not path:
+            return web.json_response({"exists": False, "is_dir": False,
+                                       "abs": "", "file_count": 0,
+                                       "reason": "empty"})
+        try:
+            ap = os.path.abspath(path)
+        except Exception as e:
+            return web.json_response({"exists": False, "is_dir": False,
+                                       "abs": path, "file_count": 0,
+                                       "reason": f"abspath: {e}"})
+        exists = os.path.exists(ap)
+        is_dir = os.path.isdir(ap)
+        file_count = 0
+        if is_dir:
+            # Cheap probe: just count entries at top level (don't recurse).
+            try:
+                file_count = sum(1 for _ in os.scandir(ap))
+            except Exception:
+                file_count = 0
+        return web.json_response({
+            "exists": exists,
+            "is_dir": is_dir,
+            "abs": ap,
+            "file_count": file_count,
+        })
+
     def _mask_token(v: str) -> str:
         """Return a masked preview like 'hf_xx••••••••wxyz' that never exposes the full token."""
         if not v:
@@ -584,6 +625,17 @@ def register_routes() -> None:
                 if isinstance(value, str) and "•" in value:
                     ignored.append(k)
                     continue
+            # extra_model_paths must be a list of non-empty strings.
+            # Silently drop garbage entries (None, ints, empty strings)
+            # so a single malformed UI input doesn't poison the config.
+            if k == "extra_model_paths":
+                if not isinstance(value, list):
+                    ignored.append(k)
+                    continue
+                value = [
+                    s.strip() for s in value
+                    if isinstance(s, str) and s.strip()
+                ]
             cfg[k] = value
         save_config(cfg)
         return web.json_response({"ok": True, "ignored": ignored})

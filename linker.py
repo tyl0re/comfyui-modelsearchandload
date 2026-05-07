@@ -39,7 +39,12 @@ _MAX_INDEXED_FILES = 100_000
 
 def _models_root_dirs() -> list[str]:
     """Mirror of scanner._models_root_dirs but locally to avoid a
-    cross-module dependency at import time."""
+    cross-module dependency at import time.
+
+    Also includes user-configured extra_model_paths from config.json
+    (e.g. a second ComfyUI installation or a shared models drive)
+    so the linker can find existing copies anywhere the user told it
+    to look."""
     roots: list[str] = []
     seen: set[str] = set()
 
@@ -68,6 +73,17 @@ def _models_root_dirs() -> list[str]:
                     add(os.path.dirname(p))
             except Exception:
                 continue
+
+    # User-configured extra paths
+    try:
+        from .config import load_config
+        cfg = load_config()
+        for p in (cfg.get("extra_model_paths") or []):
+            if isinstance(p, str) and p.strip():
+                add(p.strip())
+    except Exception:
+        pass
+
     return roots
 
 
