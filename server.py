@@ -360,7 +360,20 @@ def register_routes() -> None:
                 })
         else:
             # Slow path: SHA-256 every candidate file in a thread executor.
-            def _hash_file(path: str) -> str | None:
+            # Use the persistent hash cache (mtime+size keyed) so repeat
+            # scans only re-hash files whose content actually changed.
+            from . import dedupe_cache as _dc
+            use_cache = bool(cfg.get("use_hash_cache", True))
+
+            def _hash_file_with_cache(path: str) -> str | None:
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    return None
+                if use_cache:
+                    cached = _dc.get(path, st.st_size, st.st_mtime)
+                    if cached:
+                        return cached
                 try:
                     h = hashlib.sha256()
                     with open(path, "rb") as f:
@@ -369,10 +382,15 @@ def register_routes() -> None:
                             if not buf:
                                 break
                             h.update(buf)
-                    return h.hexdigest()
+                    digest = h.hexdigest()
                 except Exception:
                     return None
+                if use_cache and digest:
+                    _dc.put(path, st.st_size, st.st_mtime, digest)
+                return digest
 
+            cache_hits = 0
+            cache_misses = 0
             loop = asyncio.get_event_loop()
             for (name, size), paths in candidate_groups.items():
                 deduped = _filter_unique_inodes(paths)
@@ -381,7 +399,21 @@ def register_routes() -> None:
 
                 hashes: dict[str, list[str]] = {}
                 for p in deduped:
-                    digest = await loop.run_in_executor(None, _hash_file, p)
+                    # Check cache before dispatching the slow hash.
+                    pre_cached = None
+                    if use_cache:
+                        try:
+                            st = os.stat(p)
+                            pre_cached = _dc.get(p, st.st_size, st.st_mtime)
+                        except OSError:
+                            pre_cached = None
+                    if pre_cached:
+                        cache_hits += 1
+                        digest = pre_cached
+                    else:
+                        cache_misses += 1
+                        digest = await loop.run_in_executor(
+                            None, _hash_file_with_cache, p)
                     if digest is None:
                         continue
                     hashes.setdefault(digest, []).append(p)
@@ -400,16 +432,24 @@ def register_routes() -> None:
                         "saving_bytes": saving,
                     })
 
+            # Persist any new cache entries to disk now that the scan is done.
+            if use_cache:
+                _dc.flush()
+
         # Sort groups by savings (largest first) so the user sees high-impact
         # entries up top.
         result_groups.sort(key=lambda g: g["saving_bytes"], reverse=True)
 
-        return web.json_response({
+        response_payload = {
             "groups": result_groups,
             "method": method,
             "total_files_scanned": total_files,
             "potential_savings_bytes": total_savings,
-        })
+        }
+        if method == "hash":
+            response_payload["cache_hits"] = cache_hits
+            response_payload["cache_misses"] = cache_misses
+        return web.json_response(response_payload)
 
     @routes.post("/model_downloader/dedupe_apply")
     async def _dedupe_apply(request: web.Request):
@@ -486,9 +526,17 @@ def register_routes() -> None:
                                     "reason": "size mismatch (file changed?)"})
                     continue
 
-                # Delete the duplicate, then hardlink.
+                # Delete the duplicate, then hardlink. Drop any cached
+                # hash for the removed path; after the hardlink it shares
+                # the keep file's content so the keep entry is what
+                # matters going forward.
                 try:
                     os.remove(path)
+                    try:
+                        from . import dedupe_cache as _dc
+                        _dc.remove(path)
+                    except Exception:
+                        pass
                 except OSError as e:
                     results.append({"keep": keep, "remove": path,
                                     "status": "error", "reason": f"remove: {e}"})
@@ -528,6 +576,30 @@ def register_routes() -> None:
             "linked_count": success_count,
             "freed_bytes": total_freed,
         })
+
+    @routes.post("/model_downloader/clear_dedupe_cache")
+    async def _clear_dedupe_cache(request: web.Request):
+        """Wipe the persistent SHA-256 cache. The next 'Free Space Via
+        Link' run will rehash from scratch.
+
+        Body (optional): { "prune_only": true } - removes only entries
+        whose underlying file no longer exists, keeps the rest.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        from . import dedupe_cache as _dc
+        if payload.get("prune_only"):
+            removed = _dc.prune_missing()
+            return web.json_response({"pruned": removed, "cleared": False})
+        n = _dc.clear()
+        return web.json_response({"pruned": 0, "cleared": True, "removed": n})
+
+    @routes.get("/model_downloader/dedupe_cache_stats")
+    async def _dedupe_cache_stats(request: web.Request):
+        from . import dedupe_cache as _dc
+        return web.json_response(_dc.stats())
 
     @routes.post("/model_downloader/check_path")
     async def _check_path(request: web.Request):

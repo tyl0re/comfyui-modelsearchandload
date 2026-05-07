@@ -58,6 +58,12 @@ DEFAULT_CONFIG = {
     # Cross-drive linking falls back to symlinks because hardlinks
     # cannot cross filesystems on any OS.
     "extra_model_paths": [],
+    # Persist computed SHA-256 hashes to dedupe_cache.json so
+    # subsequent dedupe scans only re-hash files whose content
+    # actually changed (mtime + size mismatch). Massively speeds up
+    # the second and subsequent runs of 'Free Space Via Link'.
+    # When False, every scan rehashes everything from scratch.
+    "use_hash_cache": True,
 }
 
 

@@ -487,7 +487,21 @@ class DownloadManager:
         master = candidates[0]
         if method == "hash":
             import hashlib
+            try:
+                from . import dedupe_cache as _dc
+            except Exception:
+                _dc = None
+            use_cache = bool(cfg.get("use_hash_cache", True)) and _dc is not None
+
             def _hash(path: str) -> str | None:
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    return None
+                if use_cache:
+                    cached = _dc.get(path, st.st_size, st.st_mtime)
+                    if cached:
+                        return cached
                 try:
                     h = hashlib.sha256()
                     with open(path, "rb") as f:
@@ -496,9 +510,13 @@ class DownloadManager:
                             if not buf:
                                 break
                             h.update(buf)
-                    return h.hexdigest()
+                    digest = h.hexdigest()
                 except Exception:
                     return None
+                if use_cache and digest:
+                    _dc.put(path, st.st_size, st.st_mtime, digest)
+                return digest
+
             new_hash = _hash(new_path)
             if not new_hash:
                 return
@@ -509,6 +527,8 @@ class DownloadManager:
                     break
             if master is None:
                 return
+            if use_cache:
+                _dc.flush()
 
         # Replace new_path with a hardlink to master.
         from .linker import _try_hardlink, _try_symlink

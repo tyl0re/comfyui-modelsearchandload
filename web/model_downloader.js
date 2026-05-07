@@ -12,6 +12,8 @@ const API = {
   dedupe_scan:  "/model_downloader/dedupe_scan",
   dedupe_apply: "/model_downloader/dedupe_apply",
   check_path:   "/model_downloader/check_path",
+  clear_dedupe_cache: "/model_downloader/clear_dedupe_cache",
+  dedupe_cache_stats: "/model_downloader/dedupe_cache_stats",
   jobs:         "/model_downloader/jobs",
   cancel:       "/model_downloader/cancel",
   clear:        "/model_downloader/clear",
@@ -1550,7 +1552,9 @@ function buildSettingsModal() {
   setupTypingHints(hfInput, hfStatus, "hf");
   setupTypingHints(civInput, civStatus, "civ");
 
-  // Storage-saving section
+  // Storage-saving section. The toggle itself is always visible; the
+  // sub-options below it only appear when linking is enabled. This
+  // keeps the modal short for users who don't use linking at all.
   const sep = el("hr", {
     style: { margin: "16px 0 10px", border: "none", borderTop: "1px solid #444" },
   });
@@ -1565,6 +1569,12 @@ function buildSettingsModal() {
   const linkToggle = el("input", { type: "checkbox" });
   const linkToggleText = el("span", { textContent: "Reuse existing files via filesystem links" });
   linkToggleRow.append(linkToggle, linkToggleText);
+
+  // All linking-related sub-controls live inside this container so
+  // syncLinkUI() can hide them in one go.
+  const linkSubsection = el("div", {
+    style: { display: "none", flexDirection: "column" },
+  });
 
   const linkModeRow = el("div", {
     style: { display: "flex", alignItems: "center", gap: "8px", margin: "4px 0", marginLeft: "22px" },
@@ -1628,6 +1638,83 @@ function buildSettingsModal() {
     textContent: "Hash mode reads every byte of every candidate file - slow but never wrong. Name+size is instant but two unrelated files could in theory collide. The 'Free Space Via Link' button (in the panel header) and the post-download dedupe pass both use this setting.",
     style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginLeft: "22px" },
   });
+
+  // Hash cache section
+  const cacheRow = el("label", {
+    style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", margin: "8px 0 4px", marginLeft: "22px" },
+  });
+  const cacheToggle = el("input", { type: "checkbox" });
+  const cacheText = el("span", {
+    textContent: "Cache SHA-256 hashes (re-scan is fast)",
+    style: { fontSize: "12px" },
+  });
+  cacheRow.append(cacheToggle, cacheText);
+  const cacheStatsRow = el("div", {
+    style: { display: "flex", gap: "8px", alignItems: "center",
+             marginTop: "2px", marginLeft: "22px" },
+  });
+  const cacheStatsText = el("span", {
+    style: { fontSize: "11px", opacity: "0.7", flex: "1" },
+    textContent: "(loading cache stats...)",
+  });
+  const cacheClearBtn = el("button", {
+    textContent: "Clear cache",
+    style: { padding: "2px 8px", fontSize: "11px", cursor: "pointer",
+             background: "transparent", border: "1px solid #555",
+             color: "#bbb", borderRadius: "3px" },
+  });
+  const cachePruneBtn = el("button", {
+    textContent: "Prune missing",
+    style: { padding: "2px 8px", fontSize: "11px", cursor: "pointer",
+             background: "transparent", border: "1px solid #555",
+             color: "#bbb", borderRadius: "3px" },
+  });
+  cachePruneBtn.title = "Remove cache entries whose underlying file no longer exists. Faster than clearing the whole cache.";
+  cacheClearBtn.title = "Wipe all cached hashes. The next dedupe scan will re-hash every file from scratch.";
+  cacheStatsRow.append(cacheStatsText, cachePruneBtn, cacheClearBtn);
+
+  const cacheNote = el("div", {
+    textContent: "When enabled, computed hashes are saved to dedupe_cache.json and reused on the next scan if the file's size and mtime are unchanged. Massively speeds up repeated 'Free Space Via Link' runs.",
+    style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginLeft: "22px" },
+  });
+
+  async function refreshCacheStats() {
+    try {
+      const s = await jsonFetch(API.dedupe_cache_stats);
+      cacheStatsText.textContent =
+        `${s.entries} cached hash${s.entries === 1 ? "" : "es"} ` +
+        `· ${fmtBytes(s.file_bytes || 0)} on disk`;
+    } catch (e) {
+      cacheStatsText.textContent = "(stats unavailable)";
+    }
+  }
+  cacheClearBtn.onclick = async () => {
+    if (!confirm("Wipe all cached file hashes? Next scan will be slow.")) return;
+    cacheClearBtn.disabled = true;
+    try {
+      const r = await jsonFetch(API.clear_dedupe_cache,
+        { method: "POST", body: "{}" });
+      showFlash(`✓ Cleared ${r.removed || 0} cache entries.`, "#66bb6a");
+      await refreshCacheStats();
+    } catch (e) {
+      showFlash("Clear failed: " + e.message, "#ef9a9a");
+    } finally {
+      cacheClearBtn.disabled = false;
+    }
+  };
+  cachePruneBtn.onclick = async () => {
+    cachePruneBtn.disabled = true;
+    try {
+      const r = await jsonFetch(API.clear_dedupe_cache,
+        { method: "POST", body: JSON.stringify({ prune_only: true }) });
+      showFlash(`✓ Pruned ${r.pruned || 0} stale entries.`, "#66bb6a");
+      await refreshCacheStats();
+    } catch (e) {
+      showFlash("Prune failed: " + e.message, "#ef9a9a");
+    } finally {
+      cachePruneBtn.disabled = false;
+    }
+  };
 
   // Extra model paths section
   const sep2 = el("hr", {
@@ -1786,28 +1873,32 @@ function buildSettingsModal() {
   const btnClearCiv = el("button", { textContent: "Clear CivitAI", style: { padding: "3px 8px", fontSize: "11px", cursor: "pointer" } });
   btnRow.append(btnClearHF, btnClearCiv, btnSave, btnClose);
 
-  // Disable mode-select / dedupe controls when linking toggle is off,
-  // since they're meaningless without it.
+  // Hide / show the entire link-dependent subsection based on the
+  // master toggle. Keeps the modal short for users who don't care
+  // about linking at all.
   function syncLinkUI() {
     const on = linkToggle.checked;
-    linkMode.disabled = !on;
-    linkMode.style.opacity = on ? "1" : "0.5";
-    dedupeMode.disabled = !on;
-    dedupeMode.style.opacity = on ? "1" : "0.5";
-    autoDedupeToggle.disabled = !on;
-    autoDedupeRow.style.opacity = on ? "1" : "0.5";
+    linkSubsection.style.display = on ? "flex" : "none";
   }
   linkToggle.addEventListener("change", syncLinkUI);
   syncLinkUI();
+
+  // Build the link-dependent subsection. Every control inside is
+  // shown/hidden as a unit by syncLinkUI().
+  linkSubsection.append(
+    linkModeRow, linkNote,
+    dedupeRow, autoDedupeRow, dedupeNote,
+    cacheRow, cacheStatsRow, cacheNote,
+    sep2, extraHeader, extraNote, extraList, extraAddRow, extraValidationMsg,
+  );
 
   box.append(
     title,
     hfLabel, hfInput, hfStatus,
     civLabel, civInput, civStatus,
     note,
-    sep, linkHeader, linkToggleRow, linkModeRow, linkNote,
-    dedupeRow, autoDedupeRow, dedupeNote,
-    sep2, extraHeader, extraNote, extraList, extraAddRow, extraValidationMsg,
+    sep, linkHeader, linkToggleRow,
+    linkSubsection,
     flash, btnRow,
   );
   overlay.append(box);
@@ -1865,6 +1956,9 @@ function buildSettingsModal() {
       const dopts = Array.from(dedupeMode.options).map(o => o.value);
       dedupeMode.value = dopts.includes(dedupe) ? dedupe : "hash";
       autoDedupeToggle.checked = cfg.auto_dedupe_after_download !== false; // default true
+      cacheToggle.checked = cfg.use_hash_cache !== false; // default true
+      // Stats are async, fire and forget
+      refreshCacheStats();
       // Extra paths: revalidate each one in the background so the user
       // sees broken paths flagged. We render synchronously first with
       // an "?" status, then update as results come in.
@@ -1915,6 +2009,7 @@ function buildSettingsModal() {
         dedupe_method: dedupeMode.value,
         auto_dedupe_after_download: autoDedupeToggle.checked,
         extra_model_paths: extraPaths.map(e => e.path),
+        use_hash_cache: cacheToggle.checked,
       };
       const resp = await jsonFetch(API.config, {
         method: "POST",

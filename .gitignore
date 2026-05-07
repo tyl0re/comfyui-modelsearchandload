@@ -19,6 +19,7 @@ env/
 # Plugin runtime data — NEVER commit these
 config.json
 user_known_models.json
+dedupe_cache.json
 *.log
 
 # Editor / OS
