@@ -2189,19 +2189,8 @@ app.registerExtension({
 // 5. On Apply, hit /dedupe_apply with the user's choices and show results.
 
 async function runDedupeFlow(statusEl) {
-  const ok = confirm(
-    "Free Space Via Link\n\n" +
-    "This will walk your entire models tree and compute a SHA-256 hash for every\n" +
-    "model file (.safetensors, .ckpt, .pt, .pth, .bin, .gguf, .onnx, ...).\n\n" +
-    "WARNING: This can take a long time - potentially HOURS - depending on how\n" +
-    "many gigabytes of model files you have. Hashing reads every byte of every\n" +
-    "candidate file from disk.\n\n" +
-    "The scan is read-only. No files are touched until you review the\n" +
-    "results and click Apply.\n\n" +
-    "Are you sure you want to start?"
-  );
-  if (!ok) return;
-
+  // The slow-scan warning lives in the Settings tooltip / docs; no
+  // need to nag the user every time they click the toolbar button.
   if (statusEl) statusEl.textContent = "Dedupe: scanning + hashing files (this can take a long time)...";
 
   // Block UI with a simple progress overlay so the user knows something is happening.
@@ -2537,14 +2526,10 @@ function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
       totalLinks += removePaths.length;
     }
     if (reqGroups.length === 0) {
-      alert("Nothing to do - no LINK rows selected.");
+      // Apply button is disabled by updateTotal() in this case, but
+      // guard anyway in case of a race.
       return;
     }
-    const ok = confirm(
-      `About to delete ${totalLinks} duplicate file(s) and replace each with a hardlink.\n\n` +
-      `This is reversible only by re-downloading the file(s). Proceed?`
-    );
-    if (!ok) return;
     btnApply.disabled = true;
     btnApply.textContent = "Working...";
 
