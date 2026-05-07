@@ -69,6 +69,16 @@ def _key(path: str) -> str:
 
 
 def _load_from_disk() -> dict[str, dict]:
+    """Load the on-disk cache file.
+
+    Forward-compatible across cache version bumps: when an older
+    version is encountered we don't blindly throw it away. We try to
+    re-key the existing entries through the current `_key()` function.
+    On Windows this is a no-op because `os.path.normcase` (v1) and
+    `.lower()` (v2) produce identical strings for backslash paths. On
+    Linux v1 keys were case-preserved while v2 expects lowercased; the
+    re-key step lowercases them so the cache survives the upgrade.
+    """
     if not CACHE_FILE.exists():
         return {}
     try:
@@ -76,16 +86,32 @@ def _load_from_disk() -> dict[str, dict]:
             data = json.load(f)
         if not isinstance(data, dict):
             return {}
-        if data.get("version") != _CACHE_VERSION:
-            return {}
+        version = data.get("version")
         entries = data.get("entries")
         if not isinstance(entries, dict):
             return {}
-        # Sanity-filter: every entry must be a dict with the three keys.
-        return {
+
+        # Sanity-filter every entry first.
+        valid = {
             k: v for k, v in entries.items()
             if isinstance(v, dict) and "hash" in v and "size" in v and "mtime" in v
         }
+        if not valid:
+            return {}
+
+        if version == _CACHE_VERSION:
+            return valid
+
+        # Older or missing version: rewrite keys through the current
+        # _key() so they look up correctly. We mark dirty so the next
+        # flush() rewrites the file with the new version stamp.
+        global _dirty
+        upgraded: dict[str, dict] = {}
+        for k, v in valid.items():
+            new_key = _key(k)
+            upgraded[new_key] = v
+        _dirty = True
+        return upgraded
     except Exception:
         return {}
 
