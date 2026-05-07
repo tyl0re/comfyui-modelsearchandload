@@ -9,6 +9,8 @@ const API = {
   web_search:   "/model_downloader/web_search",
   download:     "/model_downloader/download",
   relocate:     "/model_downloader/relocate",
+  dedupe_scan:  "/model_downloader/dedupe_scan",
+  dedupe_apply: "/model_downloader/dedupe_apply",
   jobs:         "/model_downloader/jobs",
   cancel:       "/model_downloader/cancel",
   clear:        "/model_downloader/clear",
@@ -77,9 +79,12 @@ function buildPanel(container) {
 
   const btnScan = el("button", { textContent: "Scan workflow" });
   const btnRelocate = el("button", { textContent: "Move existing" });
+  const btnDedupe = el("button", { textContent: "Free Space Via Link" });
   const btnSettings = el("button", { textContent: "Settings" });
 
-  for (const b of [btnScan, btnRelocate, btnSettings]) {
+  btnDedupe.title = "Find duplicate model files anywhere in your models tree and replace duplicates with hardlinks pointing at one master copy. Frees disk space without breaking any workflow.";
+
+  for (const b of [btnScan, btnRelocate, btnDedupe, btnSettings]) {
     Object.assign(b.style, {
       padding: "5px 10px",
       cursor: "pointer",
@@ -93,7 +98,7 @@ function buildPanel(container) {
   btnRelocate.style.opacity = "0.5";
   btnRelocate.title = "Move files that are already on disk into the folder ComfyUI actually expects.";
 
-  header.append(title, btnScan, btnRelocate, btnSettings);
+  header.append(title, btnScan, btnRelocate, btnDedupe, btnSettings);
 
   const status = el("div", {
     style: { fontSize: "12px", opacity: "0.8", minHeight: "16px" },
@@ -127,6 +132,10 @@ function buildPanel(container) {
   btnSettings.onclick = () => {
     if (!settingsModal) settingsModal = buildSettingsModal();
     settingsModal.open();
+  };
+
+  btnDedupe.onclick = () => {
+    runDedupeFlow(status);
   };
 
   function setActionsEnabled(enabled) {
@@ -1778,3 +1787,315 @@ app.registerExtension({
     }
   },
 });
+
+// ---------- Dedupe (Free Space Via Link) flow ----------
+//
+// 1. User clicks the toolbar button.
+// 2. We show a confirmation dialog warning about the (possibly long)
+//    full-disk hash scan.
+// 3. On confirm, hit /dedupe_scan and stream-display progress.
+// 4. Render a results modal listing every duplicate group with:
+//      - filename, size, count
+//      - per-group radio (which copy to KEEP) and per-row checkboxes (which to remove/link)
+//      - total disk space that will be freed
+// 5. On Apply, hit /dedupe_apply with the user's choices and show results.
+
+async function runDedupeFlow(statusEl) {
+  const ok = confirm(
+    "Free Space Via Link\n\n" +
+    "This will walk your entire models tree and compute a SHA-256 hash for every\n" +
+    "model file (.safetensors, .ckpt, .pt, .pth, .bin, .gguf, .onnx, ...).\n\n" +
+    "WARNING: This can take a long time - potentially HOURS - depending on how\n" +
+    "many gigabytes of model files you have. Hashing reads every byte of every\n" +
+    "candidate file from disk.\n\n" +
+    "The scan is read-only. No files are touched until you review the\n" +
+    "results and click Apply.\n\n" +
+    "Are you sure you want to start?"
+  );
+  if (!ok) return;
+
+  if (statusEl) statusEl.textContent = "Dedupe: scanning + hashing files (this can take a long time)...";
+
+  // Block UI with a simple progress overlay so the user knows something is happening.
+  const overlay = el("div", {
+    style: {
+      position: "fixed", inset: "0",
+      background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: "10000",
+      color: "#ddd",
+      fontFamily: "sans-serif",
+      flexDirection: "column",
+      gap: "12px",
+    },
+  });
+  const spin = el("div", { className: "md-spinner",
+    style: { width: "32px", height: "32px", borderWidth: "4px" } });
+  ensureJobStyles();
+  const msg = el("div", {
+    textContent: "Hashing model files... (do not close this tab)",
+    style: { fontSize: "16px", fontWeight: "bold" } });
+  const sub = el("div", {
+    textContent: "May take minutes to hours.",
+    style: { fontSize: "13px", opacity: "0.85" } });
+  overlay.append(spin, msg, sub);
+  document.body.appendChild(overlay);
+
+  let data;
+  try {
+    data = await jsonFetch(API.dedupe_scan, { method: "POST", body: "{}" });
+  } catch (e) {
+    overlay.remove();
+    if (statusEl) statusEl.textContent = "Dedupe scan failed: " + e.message;
+    alert("Dedupe scan failed: " + e.message);
+    return;
+  }
+  overlay.remove();
+
+  const groups = data.groups || [];
+  const totalScanned = data.total_files_scanned || 0;
+  const totalSavings = data.potential_savings_bytes || 0;
+
+  if (statusEl) {
+    statusEl.textContent = `Dedupe: ${groups.length} duplicate group(s) found, ` +
+      `${fmtBytes(totalSavings)} reclaimable from ${totalScanned} files scanned.`;
+  }
+
+  if (groups.length === 0) {
+    alert(`No duplicates found.\n\nScanned ${totalScanned} model files; every one is unique.`);
+    return;
+  }
+
+  showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl);
+}
+
+function showDedupeResultsModal(groups, totalSavings, totalScanned, statusEl) {
+  // Build a modal listing every group. Each group has:
+  //   - title: filename (size, count copies)
+  //   - radio buttons "keep this one" - one per path, default = first
+  //   - the unselected ones are auto-displayed as "will be linked"
+  const overlay = el("div", {
+    style: {
+      position: "fixed", inset: "0",
+      background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: "10000",
+    },
+  });
+  const box = el("div", {
+    style: {
+      background: "var(--comfy-menu-bg, #2a2a2a)",
+      color: "var(--input-text, #ddd)",
+      padding: "16px",
+      borderRadius: "8px",
+      width: "min(900px, 92vw)",
+      maxHeight: "85vh",
+      display: "flex", flexDirection: "column", gap: "10px",
+      fontFamily: "sans-serif",
+      fontSize: "13px",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
+    },
+  });
+
+  const title = el("h3", {
+    textContent: `Free Space Via Link - ${groups.length} duplicate group(s)`,
+    style: { margin: "0 0 4px 0" },
+  });
+  const summary = el("div", {
+    textContent: `Up to ${fmtBytes(totalSavings)} can be reclaimed by replacing duplicates with hardlinks. ` +
+                 `${totalScanned} files scanned in total.`,
+    style: { fontSize: "12px", opacity: "0.85" },
+  });
+  const help = el("div", {
+    textContent: "For each group, pick which copy to KEEP. The other copies will be deleted and replaced with hardlinks pointing at the keeper. The data on disk is identical so no workflow will break.",
+    style: { fontSize: "11px", opacity: "0.7", lineHeight: "1.4" },
+  });
+
+  // Scrollable list
+  const list = el("div", {
+    style: {
+      flex: "1 1 auto",
+      overflow: "auto",
+      border: "1px solid var(--border-color, #444)",
+      borderRadius: "4px",
+      padding: "6px",
+      background: "var(--comfy-input-bg, #1f1f1f)",
+    },
+  });
+
+  // Per-group state. groupState[i] = { keepIdx: number, paths: string[], hash, size, name }
+  const groupState = groups.map((g, gi) => ({
+    keepIdx: 0,  // default: first path
+    paths: g.paths,
+    hash: g.hash,
+    size: g.size,
+    name: g.name,
+    saving: g.saving_bytes,
+  }));
+
+  for (let gi = 0; gi < groupState.length; gi++) {
+    const g = groupState[gi];
+    const groupBox = el("div", {
+      style: {
+        padding: "8px",
+        marginBottom: "6px",
+        border: "1px solid var(--border-color, #444)",
+        borderRadius: "4px",
+        background: "var(--comfy-menu-bg, #2c2c2c)",
+      },
+    });
+    const groupHeader = el("div", {
+      style: { display: "flex", gap: "8px", alignItems: "baseline",
+               marginBottom: "4px", flexWrap: "wrap" },
+    });
+    groupHeader.append(
+      el("span", { textContent: g.name,
+        style: { fontWeight: "bold", fontFamily: "ui-monospace, monospace" } }),
+      el("span", { textContent: `${fmtBytes(g.size)} × ${g.paths.length} = ` +
+                                 `${fmtBytes(g.saving)} saved`,
+        style: { fontSize: "11px", opacity: "0.85" } }),
+      el("span", { textContent: `sha256: ${g.hash.slice(0, 12)}...`,
+        style: { fontSize: "10px", opacity: "0.55", fontFamily: "ui-monospace, monospace" } }),
+    );
+    groupBox.appendChild(groupHeader);
+
+    const radioName = `dedupe-group-${gi}`;
+    g.paths.forEach((p, pi) => {
+      const row = el("label", {
+        style: {
+          display: "flex", gap: "6px", alignItems: "center",
+          padding: "3px 6px",
+          fontFamily: "ui-monospace, monospace",
+          fontSize: "11px",
+          cursor: "pointer",
+          borderRadius: "3px",
+        },
+      });
+      const radio = el("input", {
+        type: "radio",
+        name: radioName,
+        value: String(pi),
+        checked: pi === 0,
+      });
+      radio.onchange = () => {
+        if (radio.checked) {
+          g.keepIdx = pi;
+          updateRowStyles();
+          updateTotal();
+        }
+      };
+      const tag = el("span", {
+        textContent: pi === 0 ? "KEEP" : "→ link",
+        style: {
+          minWidth: "44px",
+          padding: "1px 5px",
+          textAlign: "center",
+          fontSize: "9px",
+          fontWeight: "bold",
+          borderRadius: "3px",
+          background: pi === 0 ? "#2e7d32" : "#1976d2",
+          color: "#fff",
+        },
+      });
+      row.dataset.pi = String(pi);
+      row.dataset.tagEl = "1";
+      const pathSpan = el("span", { textContent: p, style: { wordBreak: "break-all", flex: "1" } });
+      row.append(radio, tag, pathSpan);
+      groupBox.appendChild(row);
+
+      function updateRowStyles() {
+        const rows = groupBox.querySelectorAll("label");
+        rows.forEach((r, ri) => {
+          const isKeep = ri === g.keepIdx;
+          const t = r.querySelector("span"); // tag
+          if (t) {
+            t.textContent = isKeep ? "KEEP" : "→ link";
+            t.style.background = isKeep ? "#2e7d32" : "#1976d2";
+          }
+        });
+      }
+    });
+    list.appendChild(groupBox);
+  }
+
+  // Footer with total + apply button
+  const footer = el("div", {
+    style: { display: "flex", gap: "8px", alignItems: "center", marginTop: "4px" },
+  });
+  const totalEl = el("div", {
+    style: { flex: "1", fontWeight: "bold", color: "#66bb6a" },
+  });
+  function updateTotal() {
+    let saving = 0;
+    for (const g of groupState) {
+      saving += g.size * (g.paths.length - 1);
+    }
+    totalEl.textContent = `Will free ~${fmtBytes(saving)}`;
+  }
+  updateTotal();
+
+  const btnCancel = el("button", {
+    textContent: "Cancel",
+    style: {
+      padding: "6px 14px", cursor: "pointer",
+      background: "transparent", border: "1px solid #555",
+      color: "#bbb", borderRadius: "4px",
+    },
+  });
+  btnCancel.onclick = () => overlay.remove();
+
+  const btnApply = el("button", {
+    textContent: "Apply (replace duplicates with hardlinks)",
+    style: {
+      padding: "6px 14px", cursor: "pointer",
+      background: "#1976d2", border: "none",
+      color: "#fff", borderRadius: "4px", fontWeight: "bold",
+    },
+  });
+  btnApply.onclick = async () => {
+    const ok = confirm(
+      "About to delete every duplicate file and replace it with a hardlink.\n\n" +
+      "This is reversible only by re-downloading the file. Proceed?"
+    );
+    if (!ok) return;
+    btnApply.disabled = true;
+    btnApply.textContent = "Working...";
+
+    const payload = {
+      groups: groupState.map(g => ({
+        keep: g.paths[g.keepIdx],
+        remove: g.paths.filter((_, i) => i !== g.keepIdx),
+      })),
+    };
+    try {
+      const res = await jsonFetch(API.dedupe_apply, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const linked = res.linked_count || 0;
+      const freed = res.freed_bytes || 0;
+      const errors = (res.results || []).filter(r => r.status === "error");
+      let msg = `Done. Linked ${linked} file(s). Freed ${fmtBytes(freed)}.`;
+      if (errors.length) {
+        msg += `\n\n${errors.length} error(s):\n` +
+               errors.slice(0, 5).map(e => `  ${e.remove}: ${e.reason}`).join("\n");
+        if (errors.length > 5) msg += `\n  ... and ${errors.length - 5} more`;
+      }
+      alert(msg);
+      if (statusEl) {
+        statusEl.textContent = `Dedupe: linked ${linked} file(s), freed ${fmtBytes(freed)}.`;
+      }
+      overlay.remove();
+    } catch (e) {
+      alert("Dedupe apply failed: " + e.message);
+      btnApply.disabled = false;
+      btnApply.textContent = "Apply (replace duplicates with hardlinks)";
+    }
+  };
+
+  footer.append(totalEl, btnCancel, btnApply);
+
+  box.append(title, summary, help, list, footer);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}

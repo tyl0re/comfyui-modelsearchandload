@@ -249,6 +249,260 @@ def register_routes() -> None:
         moved = sum(1 for r in results if r["status"] == "moved")
         return web.json_response({"results": results, "moved": moved, "total": len(items)})
 
+    @routes.post("/model_downloader/dedupe_scan")
+    async def _dedupe_scan(request: web.Request):
+        """Walk the models tree and find duplicate files (same SHA-256 hash).
+
+        Strategy:
+          1. Group all model files by (basename_lc, size_bytes). Files with
+             unique size are not duplicates.
+          2. For groups with 2+ files, hash each one (SHA-256) to confirm
+             content equality. This is the slow part - GBs of disk read.
+          3. Skip files that are already symlinks or hardlinks of each
+             other (os.path.samefile) - already deduped.
+
+        Returns:
+            { "groups": [
+                { "hash": "abc123...", "size": 12345, "name": "foo.safetensors",
+                  "paths": ["/a/foo.safetensors", "/b/foo.safetensors"] },
+                ... ],
+              "total_files_scanned": 1234,
+              "potential_savings_bytes": 9999999 }
+        """
+        import os
+        import hashlib
+        import asyncio
+        from .scanner import _models_root_dirs, _LOCAL_INDEX_EXTS
+
+        # Walk the tree, group by (basename_lc, size). followlinks=True
+        # but inode tracking ensures we don't traverse the same dir twice.
+        groups_by_key: dict[tuple[str, int], list[str]] = {}
+        seen_inodes: set[tuple[int, int]] = set()
+        total_files = 0
+        for root in _models_root_dirs():
+            for dirpath, _dirs, files in os.walk(root, followlinks=True):
+                try:
+                    st = os.stat(dirpath)
+                    key = (st.st_dev, st.st_ino)
+                    if key in seen_inodes:
+                        _dirs[:] = []
+                        continue
+                    seen_inodes.add(key)
+                except OSError:
+                    pass
+                for fn in files:
+                    if not fn.lower().endswith(_LOCAL_INDEX_EXTS):
+                        continue
+                    full = os.path.join(dirpath, fn)
+                    try:
+                        sz = os.path.getsize(full)
+                    except OSError:
+                        continue
+                    groups_by_key.setdefault((fn.lower(), sz), []).append(full)
+                    total_files += 1
+
+        # Filter: keep only groups with 2+ files
+        candidate_groups = {k: v for k, v in groups_by_key.items() if len(v) >= 2}
+
+        # For each group, hash files to confirm they really are identical.
+        # Done in a thread executor so the asyncio loop isn't blocked.
+        def _hash_file(path: str) -> str | None:
+            try:
+                h = hashlib.sha256()
+                with open(path, "rb") as f:
+                    while True:
+                        buf = f.read(8 * 1024 * 1024)  # 8 MB chunks
+                        if not buf:
+                            break
+                        h.update(buf)
+                return h.hexdigest()
+            except Exception:
+                return None
+
+        loop = asyncio.get_event_loop()
+        result_groups: list[dict] = []
+        total_savings = 0
+
+        for (name, size), paths in candidate_groups.items():
+            # Skip pairs that are ALREADY hardlinks/symlinks of each other.
+            # If all paths in the group resolve to the same inode then
+            # nothing to do here.
+            unique_inodes: set[tuple[int, int]] = set()
+            for p in paths:
+                try:
+                    s = os.stat(p)
+                    unique_inodes.add((s.st_dev, s.st_ino))
+                except OSError:
+                    pass
+            if len(unique_inodes) <= 1:
+                continue  # all already linked / share same inode
+
+            # Hash every path. Group by hash.
+            hashes: dict[str, list[str]] = {}
+            for p in paths:
+                digest = await loop.run_in_executor(None, _hash_file, p)
+                if digest is None:
+                    continue
+                hashes.setdefault(digest, []).append(p)
+
+            for digest, hpaths in hashes.items():
+                if len(hpaths) < 2:
+                    continue
+                # Filter out same-inode duplicates within this hash group
+                seen_in_group: set[tuple[int, int]] = set()
+                deduped_paths: list[str] = []
+                for p in hpaths:
+                    try:
+                        s = os.stat(p)
+                        ikey = (s.st_dev, s.st_ino)
+                        if ikey in seen_in_group:
+                            continue
+                        seen_in_group.add(ikey)
+                        deduped_paths.append(p)
+                    except OSError:
+                        pass
+                if len(deduped_paths) < 2:
+                    continue
+
+                # Saving = (n-1) * size bytes (we keep one, link the rest)
+                saving = (len(deduped_paths) - 1) * size
+                total_savings += saving
+                result_groups.append({
+                    "hash": digest,
+                    "size": size,
+                    "name": name,
+                    "paths": deduped_paths,
+                    "saving_bytes": saving,
+                })
+
+        # Sort groups by savings (largest first) so the user sees high-impact
+        # entries up top.
+        result_groups.sort(key=lambda g: g["saving_bytes"], reverse=True)
+
+        return web.json_response({
+            "groups": result_groups,
+            "total_files_scanned": total_files,
+            "potential_savings_bytes": total_savings,
+        })
+
+    @routes.post("/model_downloader/dedupe_apply")
+    async def _dedupe_apply(request: web.Request):
+        """Replace duplicate files with hardlinks pointing to a chosen master.
+
+        Body:
+            { "groups": [
+                { "keep": "/path/to/master.safetensors",
+                  "remove": ["/path/to/dup1.safetensors", ...] },
+                ... ] }
+
+        For each group:
+          1. Verify keep + remove paths still exist and have the same size
+             (cheap sanity check; full hash already done in dedupe_scan).
+          2. For each path in `remove`:
+             a. Skip if same inode as keep (already linked).
+             b. Delete the file.
+             c. Hardlink keep -> path.
+             d. On hardlink failure (cross-fs etc.), fall back to symlink.
+             e. On total failure, restore from .dedupe_backup if we can.
+          3. Return per-path status.
+        """
+        import os
+        from .linker import _try_hardlink, _try_symlink
+
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        groups = payload.get("groups") or []
+        results = []
+        total_freed = 0
+        success_count = 0
+
+        for grp in groups:
+            keep = grp.get("keep")
+            remove = grp.get("remove") or []
+            if not keep or not isinstance(remove, list):
+                results.append({"keep": keep, "status": "skipped",
+                                "reason": "missing keep or remove"})
+                continue
+            if not os.path.isfile(keep):
+                results.append({"keep": keep, "status": "skipped",
+                                "reason": "keep path not a file"})
+                continue
+            try:
+                keep_size = os.path.getsize(keep)
+                keep_st = os.stat(keep)
+                keep_inode = (keep_st.st_dev, keep_st.st_ino)
+            except OSError as e:
+                results.append({"keep": keep, "status": "skipped",
+                                "reason": f"stat keep failed: {e}"})
+                continue
+
+            for path in remove:
+                if not os.path.isfile(path):
+                    results.append({"keep": keep, "remove": path,
+                                    "status": "skipped", "reason": "not a file"})
+                    continue
+                try:
+                    st = os.stat(path)
+                except OSError as e:
+                    results.append({"keep": keep, "remove": path,
+                                    "status": "skipped", "reason": f"stat: {e}"})
+                    continue
+                if (st.st_dev, st.st_ino) == keep_inode:
+                    results.append({"keep": keep, "remove": path,
+                                    "status": "already_linked"})
+                    continue
+                if st.st_size != keep_size:
+                    results.append({"keep": keep, "remove": path,
+                                    "status": "skipped",
+                                    "reason": "size mismatch (file changed?)"})
+                    continue
+
+                # Delete the duplicate, then hardlink.
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    results.append({"keep": keep, "remove": path,
+                                    "status": "error", "reason": f"remove: {e}"})
+                    continue
+
+                # Try hardlink first
+                ok, err = _try_hardlink(keep, path)
+                method = "hardlink"
+                if not ok:
+                    # Cross-filesystem? Fall back to symlink.
+                    ok, err2 = _try_symlink(keep, path)
+                    method = "symlink"
+                    if not ok:
+                        # Both failed - we already deleted the file. Try to
+                        # at least copy it back so we don't leave the user
+                        # with missing models.
+                        try:
+                            import shutil
+                            shutil.copy2(keep, path)
+                            results.append({"keep": keep, "remove": path,
+                                            "status": "error",
+                                            "reason": f"link failed; restored from copy. hardlink: {err}; symlink: {err2}"})
+                        except Exception as ce:
+                            results.append({"keep": keep, "remove": path,
+                                            "status": "error",
+                                            "reason": f"link failed AND restore failed: {err}; {err2}; copy: {ce}"})
+                        continue
+
+                results.append({"keep": keep, "remove": path,
+                                "status": "linked", "method": method,
+                                "freed_bytes": keep_size})
+                total_freed += keep_size
+                success_count += 1
+
+        return web.json_response({
+            "results": results,
+            "linked_count": success_count,
+            "freed_bytes": total_freed,
+        })
+
     def _mask_token(v: str) -> str:
         """Return a masked preview like 'hf_xx••••••••wxyz' that never exposes the full token."""
         if not v:
