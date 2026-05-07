@@ -591,6 +591,12 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "WanVideoLoraSelectMulti":    [(0, "loras"), (2, "loras"), (4, "loras"), (6, "loras")],
     "LoadWanVideoT5TextEncoder":  [(0, "text_encoders")],
     "LoadWanVideoClipTextEncoder":[(0, "clip_vision")],
+    # FlashVSR specific loaders (sub-package of ComfyUI-WanVideoWrapper)
+    # WanVideoFlashVSRDecoderLoader: TCDecoder safetensors loaded from vae/
+    "WanVideoFlashVSRDecoderLoader": [(0, "vae")],
+    # WanVideoExtraModelSelect: extra model file (e.g. FlashVSR LQ_proj, VACE)
+    # loaded from unet_gguf + diffusion_models. We surface as diffusion_models.
+    "WanVideoExtraModelSelect":      [(0, "diffusion_models")],
 }
 
 _STRICT_UI_NODE_FOLDERS: set[str] = {
