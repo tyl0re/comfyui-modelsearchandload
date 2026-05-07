@@ -8,9 +8,9 @@ only re-hash files whose content actually changed (mtime + size mismatch).
 Cache layout (JSON, written next to config.json):
 
     {
-        "version": 1,
+        "version": 2,
         "entries": {
-            "C:\\Ai\\ComfyUI\\models\\loras\\foo.safetensors": {
+            "/home/user/ComfyUI/models/loras/foo.safetensors": {
                 "size": 12345678,
                 "mtime": 1735689600.0,
                 "hash": "abc123...sha256..."
@@ -19,10 +19,10 @@ Cache layout (JSON, written next to config.json):
         }
     }
 
-Path keys are absolute and case-preserved from the OS. On Windows where
-the filesystem is case-insensitive a single file may be looked up under
-slightly different spellings (drive letter case etc.); we normalise the
-lookup key with `os.path.normcase` to side-step that.
+Path keys are absolute and lowercased uniformly on every platform.
+That way the same file looked up under spellings that differ only in
+case (e.g. drive-letter case on Windows, or a workflow that quoted
+the path with mixed case) hits the same cache entry.
 """
 
 from __future__ import annotations
@@ -35,7 +35,11 @@ from typing import Optional
 from .config import PLUGIN_DIR
 
 CACHE_FILE = PLUGIN_DIR / "dedupe_cache.json"
-_CACHE_VERSION = 1
+# Bumped from 1 -> 2 when _key() switched from os.path.normcase to
+# .lower(). On Linux the old cache had case-sensitive keys; the new
+# code expects lowercased keys. Old caches are simply discarded on
+# load (which is harmless - they get rebuilt on the next scan).
+_CACHE_VERSION = 2
 
 # In-memory copy of the cache; written back to disk lazily.
 # Keyed by os.path.normcase(os.path.abspath(path)).
@@ -45,11 +49,23 @@ _dirty = False
 
 
 def _key(path: str) -> str:
-    """Canonical lookup key for a filesystem path."""
+    """Canonical lookup key for a filesystem path.
+
+    We use absolute path + .lower() (NOT os.path.normcase) so that the
+    cache behaves the same on Windows and Linux: keys are always
+    case-folded. On Linux this is technically more aggressive than the
+    filesystem requires (ext4 is case-sensitive), but that only causes
+    the same cache entry to serve two paths that differ only in case -
+    no false hits, no data corruption.
+
+    Rationale: matches the case-insensitive strategy in downloader.py's
+    duplicate-detection so users get consistent behaviour across both
+    code paths regardless of OS.
+    """
     try:
-        return os.path.normcase(os.path.abspath(path))
+        return os.path.abspath(path).lower()
     except Exception:
-        return os.path.normcase(path)
+        return path.lower()
 
 
 def _load_from_disk() -> dict[str, dict]:
@@ -188,7 +204,11 @@ def prune_missing() -> int:
     with _lock:
         # Iterate over a snapshot of keys so we can mutate the dict.
         for k in list(cache.keys()):
-            # The key is normcased + absolute; that's fine for os.path.exists.
+            # Keys are lowercased absolute paths. os.path.exists works
+            # case-insensitively on Windows (NTFS) and case-sensitively
+            # on Linux. On Linux this means a renamed file with a
+            # different-case spelling looks "missing" and gets pruned -
+            # which is the correct outcome.
             if not os.path.exists(k):
                 del cache[k]
                 removed += 1

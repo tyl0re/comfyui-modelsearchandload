@@ -1736,9 +1736,25 @@ function buildSettingsModal() {
   const extraAddRow = el("div", {
     style: { display: "flex", gap: "6px", alignItems: "center", marginTop: "6px" },
   });
+  // Pick a placeholder that matches the OS the user is on. Use
+  // navigator.platform / userAgent because we cannot reach the server
+  // to ask. Defaults to the Linux/Mac form when we cannot tell.
+  const _isWindows = (() => {
+    try {
+      const p = (navigator.platform || "").toLowerCase();
+      const ua = (navigator.userAgent || "").toLowerCase();
+      return p.includes("win") || ua.includes("windows");
+    } catch (e) {
+      return false;
+    }
+  })();
+  const _extraPlaceholder = _isWindows
+    ? "C:\\Other\\ComfyUI\\models"
+    : "/path/to/other/ComfyUI/models";
+
   const extraAddInput = el("input", {
     type: "text",
-    placeholder: "C:\\Other\\ComfyUI\\models",
+    placeholder: _extraPlaceholder,
     style: { flex: "1", padding: "5px", boxSizing: "border-box",
              fontFamily: "monospace", fontSize: "12px",
              background: "var(--comfy-input-bg, #333)",
