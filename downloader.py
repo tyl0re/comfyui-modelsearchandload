@@ -405,10 +405,139 @@ class DownloadManager:
             os.replace(job.temp_path, job.dest_path)
             job.status = "done"
             job.finished_at = time.time()
+
+            # Post-download dedupe: look for OTHER copies of this exact
+            # file already on disk. If we find one, replace the freshly-
+            # downloaded copy with a hardlink to save disk space. This
+            # is the user's safety net for the case where the download
+            # ran (because nothing matched at link-probe time) but a
+            # duplicate exists in a subfolder our pre-download linker
+            # couldn't see (different size hint, etc.).
+            try:
+                if cfg.get("enable_linking") and cfg.get("auto_dedupe_after_download", True):
+                    self._post_download_dedupe(job, cfg)
+            except Exception as e:
+                # Best-effort; never fail the job because of this.
+                print(f"[ModelDownloader] post-download dedupe skipped: {e}")
         except Exception as e:
             job.status = "error"
             job.error = str(e)
             job.finished_at = time.time()
+
+    def _post_download_dedupe(self, job: DownloadJob, cfg: dict) -> None:
+        """After a successful download, look for another copy of the
+        same file already on disk and replace the new one with a
+        hardlink so we don't waste disk space.
+
+        Method ('size_name' or 'hash') comes from cfg['dedupe_method'].
+        Skips paths that are the freshly-downloaded file itself or that
+        already share its inode."""
+        from .scanner import _models_root_dirs, _LOCAL_INDEX_EXTS
+        method = (cfg.get("dedupe_method") or "hash").lower()
+        if method == "disabled":
+            return
+
+        new_path = job.dest_path
+        if not os.path.isfile(new_path):
+            return
+        try:
+            new_size = os.path.getsize(new_path)
+            new_st = os.stat(new_path)
+            new_inode = (new_st.st_dev, new_st.st_ino)
+        except OSError:
+            return
+
+        new_basename = os.path.basename(new_path).lower()
+
+        # Walk to find candidates with matching name + size, different inode.
+        candidates: list[str] = []
+        seen_inodes: set[tuple[int, int]] = set()
+        for root in _models_root_dirs():
+            for dirpath, _dirs, files in os.walk(root, followlinks=True):
+                try:
+                    st = os.stat(dirpath)
+                    ikey = (st.st_dev, st.st_ino)
+                    if ikey in seen_inodes:
+                        _dirs[:] = []
+                        continue
+                    seen_inodes.add(ikey)
+                except OSError:
+                    pass
+                for fn in files:
+                    if fn.lower() != new_basename:
+                        continue
+                    if not fn.lower().endswith(_LOCAL_INDEX_EXTS):
+                        continue
+                    full = os.path.join(dirpath, fn)
+                    try:
+                        if os.path.getsize(full) != new_size:
+                            continue
+                        cs = os.stat(full)
+                        if (cs.st_dev, cs.st_ino) == new_inode:
+                            continue  # the freshly-downloaded file itself
+                    except OSError:
+                        continue
+                    candidates.append(full)
+
+        if not candidates:
+            return
+
+        # If method == hash, verify content equality before linking. With
+        # size_name, we trust the (name, size) match.
+        master = candidates[0]
+        if method == "hash":
+            import hashlib
+            def _hash(path: str) -> str | None:
+                try:
+                    h = hashlib.sha256()
+                    with open(path, "rb") as f:
+                        while True:
+                            buf = f.read(8 * 1024 * 1024)
+                            if not buf:
+                                break
+                            h.update(buf)
+                    return h.hexdigest()
+                except Exception:
+                    return None
+            new_hash = _hash(new_path)
+            if not new_hash:
+                return
+            master = None
+            for c in candidates:
+                if _hash(c) == new_hash:
+                    master = c
+                    break
+            if master is None:
+                return
+
+        # Replace new_path with a hardlink to master.
+        from .linker import _try_hardlink, _try_symlink
+        # Remove the new file, then link master -> new_path.
+        try:
+            os.remove(new_path)
+        except OSError as e:
+            print(f"[ModelDownloader] post-download dedupe: cannot remove "
+                  f"{new_path}: {e}")
+            return
+        ok, err = _try_hardlink(master, new_path)
+        method_used = "hardlink"
+        if not ok:
+            ok, err2 = _try_symlink(master, new_path)
+            method_used = "symlink"
+            if not ok:
+                # Restore from copy to leave the user's file intact.
+                try:
+                    import shutil
+                    shutil.copy2(master, new_path)
+                except Exception as ce:
+                    print(f"[ModelDownloader] post-download dedupe: link AND restore failed: "
+                          f"{err}; {err2}; {ce}")
+                return
+        # Annotate the job so the UI can show "linked after download".
+        job.link_method = method_used + "-post"
+        job.link_source = master
+        print(f"[ModelDownloader] post-download {method_used}: '{new_path}' "
+              f"-> existing '{master}' (saved {new_size} bytes)")
 
 
 # Singleton

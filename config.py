@@ -25,6 +25,24 @@ DEFAULT_CONFIG = {
     # "hardlink" = only hardlink, fail otherwise.
     # "symlink"  = only symlink.
     "linking_mode": "auto",
+    # How to identify duplicate model files for both the dedupe scanner
+    # and the post-download de-dupe-and-link step.
+    #
+    #   "hash"      = same SHA-256 hash. Slow (reads every byte) but
+    #                 100% safe; we know the content is identical.
+    #   "size_name" = same basename + same size in bytes. Fast (no
+    #                 file content read) but risks false positives in
+    #                 the rare case of two unrelated files coinciding
+    #                 in name and size.
+    #   "disabled"  = don't dedupe (the button is hidden, post-download
+    #                 hook is a no-op).
+    "dedupe_method": "hash",
+    # When True, after a successful download (not link) we look for
+    # OTHER copies of the same file already in the tree using
+    # `dedupe_method`. If a duplicate exists, the freshly-downloaded
+    # file is replaced with a hardlink. Only takes effect when
+    # `enable_linking` is also True.
+    "auto_dedupe_after_download": True,
 }
 
 

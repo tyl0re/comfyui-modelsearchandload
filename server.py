@@ -251,21 +251,32 @@ def register_routes() -> None:
 
     @routes.post("/model_downloader/dedupe_scan")
     async def _dedupe_scan(request: web.Request):
-        """Walk the models tree and find duplicate files (same SHA-256 hash).
+        """Walk the models tree and find duplicate files.
+
+        Body (all optional):
+            { "method": "hash" | "size_name",
+              "skip_singletons": true }
 
         Strategy:
           1. Group all model files by (basename_lc, size_bytes). Files with
-             unique size are not duplicates.
-          2. For groups with 2+ files, hash each one (SHA-256) to confirm
-             content equality. This is the slow part - GBs of disk read.
-          3. Skip files that are already symlinks or hardlinks of each
-             other (os.path.samefile) - already deduped.
+             unique (name, size) are never duplicates regardless of method.
+          2. If method == "size_name": every group with 2+ files (and
+             different inodes) is reported as a duplicate group. Fast
+             (no file reads beyond os.stat).
+             If method == "hash": SHA-256 hash every file in each
+             multi-file group. Only files with the same hash are reported.
+             Slow but 100% safe.
+          3. Skip files that are already symlinks/hardlinks of each other
+             (same dev+inode) - they are already deduped.
 
         Returns:
             { "groups": [
-                { "hash": "abc123...", "size": 12345, "name": "foo.safetensors",
-                  "paths": ["/a/foo.safetensors", "/b/foo.safetensors"] },
+                { "hash": "abc123..."|null, "size": 12345,
+                  "name": "foo.safetensors",
+                  "paths": ["/a/foo.safetensors", "/b/foo.safetensors"],
+                  "saving_bytes": 12345 },
                 ... ],
+              "method": "hash"|"size_name",
               "total_files_scanned": 1234,
               "potential_savings_bytes": 9999999 }
         """
@@ -273,6 +284,16 @@ def register_routes() -> None:
         import hashlib
         import asyncio
         from .scanner import _models_root_dirs, _LOCAL_INDEX_EXTS
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        cfg = load_config()
+        method = (payload.get("method") or cfg.get("dedupe_method") or "hash").lower()
+        if method not in ("hash", "size_name"):
+            method = "hash"
 
         # Walk the tree, group by (basename_lc, size). followlinks=True
         # but inode tracking ensures we don't traverse the same dir twice.
@@ -304,76 +325,80 @@ def register_routes() -> None:
         # Filter: keep only groups with 2+ files
         candidate_groups = {k: v for k, v in groups_by_key.items() if len(v) >= 2}
 
-        # For each group, hash files to confirm they really are identical.
-        # Done in a thread executor so the asyncio loop isn't blocked.
-        def _hash_file(path: str) -> str | None:
-            try:
-                h = hashlib.sha256()
-                with open(path, "rb") as f:
-                    while True:
-                        buf = f.read(8 * 1024 * 1024)  # 8 MB chunks
-                        if not buf:
-                            break
-                        h.update(buf)
-                return h.hexdigest()
-            except Exception:
-                return None
-
-        loop = asyncio.get_event_loop()
-        result_groups: list[dict] = []
-        total_savings = 0
-
-        for (name, size), paths in candidate_groups.items():
-            # Skip pairs that are ALREADY hardlinks/symlinks of each other.
-            # If all paths in the group resolve to the same inode then
-            # nothing to do here.
-            unique_inodes: set[tuple[int, int]] = set()
+        def _filter_unique_inodes(paths: list[str]) -> list[str]:
+            seen: set[tuple[int, int]] = set()
+            out: list[str] = []
             for p in paths:
                 try:
                     s = os.stat(p)
-                    unique_inodes.add((s.st_dev, s.st_ino))
+                    ikey = (s.st_dev, s.st_ino)
+                    if ikey in seen:
+                        continue
+                    seen.add(ikey)
+                    out.append(p)
                 except OSError:
                     pass
-            if len(unique_inodes) <= 1:
-                continue  # all already linked / share same inode
+            return out
 
-            # Hash every path. Group by hash.
-            hashes: dict[str, list[str]] = {}
-            for p in paths:
-                digest = await loop.run_in_executor(None, _hash_file, p)
-                if digest is None:
-                    continue
-                hashes.setdefault(digest, []).append(p)
+        result_groups: list[dict] = []
+        total_savings = 0
 
-            for digest, hpaths in hashes.items():
-                if len(hpaths) < 2:
+        if method == "size_name":
+            # Fast path: trust (name, size) match.
+            for (name, size), paths in candidate_groups.items():
+                deduped = _filter_unique_inodes(paths)
+                if len(deduped) < 2:
                     continue
-                # Filter out same-inode duplicates within this hash group
-                seen_in_group: set[tuple[int, int]] = set()
-                deduped_paths: list[str] = []
-                for p in hpaths:
-                    try:
-                        s = os.stat(p)
-                        ikey = (s.st_dev, s.st_ino)
-                        if ikey in seen_in_group:
-                            continue
-                        seen_in_group.add(ikey)
-                        deduped_paths.append(p)
-                    except OSError:
-                        pass
-                if len(deduped_paths) < 2:
-                    continue
-
-                # Saving = (n-1) * size bytes (we keep one, link the rest)
-                saving = (len(deduped_paths) - 1) * size
+                saving = (len(deduped) - 1) * size
                 total_savings += saving
                 result_groups.append({
-                    "hash": digest,
+                    "hash": None,
                     "size": size,
                     "name": name,
-                    "paths": deduped_paths,
+                    "paths": deduped,
                     "saving_bytes": saving,
                 })
+        else:
+            # Slow path: SHA-256 every candidate file in a thread executor.
+            def _hash_file(path: str) -> str | None:
+                try:
+                    h = hashlib.sha256()
+                    with open(path, "rb") as f:
+                        while True:
+                            buf = f.read(8 * 1024 * 1024)
+                            if not buf:
+                                break
+                            h.update(buf)
+                    return h.hexdigest()
+                except Exception:
+                    return None
+
+            loop = asyncio.get_event_loop()
+            for (name, size), paths in candidate_groups.items():
+                deduped = _filter_unique_inodes(paths)
+                if len(deduped) < 2:
+                    continue
+
+                hashes: dict[str, list[str]] = {}
+                for p in deduped:
+                    digest = await loop.run_in_executor(None, _hash_file, p)
+                    if digest is None:
+                        continue
+                    hashes.setdefault(digest, []).append(p)
+
+                for digest, hpaths in hashes.items():
+                    hpaths = _filter_unique_inodes(hpaths)
+                    if len(hpaths) < 2:
+                        continue
+                    saving = (len(hpaths) - 1) * size
+                    total_savings += saving
+                    result_groups.append({
+                        "hash": digest,
+                        "size": size,
+                        "name": name,
+                        "paths": hpaths,
+                        "saving_bytes": saving,
+                    })
 
         # Sort groups by savings (largest first) so the user sees high-impact
         # entries up top.
@@ -381,6 +406,7 @@ def register_routes() -> None:
 
         return web.json_response({
             "groups": result_groups,
+            "method": method,
             "total_files_scanned": total_files,
             "potential_savings_bytes": total_savings,
         })

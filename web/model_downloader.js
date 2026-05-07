@@ -68,7 +68,15 @@ function buildPanel(container) {
     fontSize: "13px",
   });
 
+  // Two-row header: row 1 = plugin name + Settings button (right-aligned),
+  // row 2 = action buttons (Scan / Move existing / Free Space Via Link).
   const header = el("div", {
+    style: { display: "flex", flexDirection: "column", gap: "6px" },
+  });
+  const headerRow1 = el("div", {
+    style: { display: "flex", gap: "6px", alignItems: "center" },
+  });
+  const headerRow2 = el("div", {
     style: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" },
   });
 
@@ -82,7 +90,7 @@ function buildPanel(container) {
   const btnDedupe = el("button", { textContent: "Free Space Via Link" });
   const btnSettings = el("button", { textContent: "Settings" });
 
-  btnDedupe.title = "Find duplicate model files anywhere in your models tree and replace duplicates with hardlinks pointing at one master copy. Frees disk space without breaking any workflow.";
+  btnDedupe.title = "Find duplicate model files anywhere in your models tree and replace duplicates with hardlinks pointing at one master copy. Frees disk space without breaking any workflow. Visibility depends on whether linking is enabled in Settings.";
 
   for (const b of [btnScan, btnRelocate, btnDedupe, btnSettings]) {
     Object.assign(b.style, {
@@ -98,7 +106,31 @@ function buildPanel(container) {
   btnRelocate.style.opacity = "0.5";
   btnRelocate.title = "Move files that are already on disk into the folder ComfyUI actually expects.";
 
-  header.append(title, btnScan, btnRelocate, btnDedupe, btnSettings);
+  // Dedupe button is hidden by default; enabled by the config-fetch
+  // result below if `enable_linking` is true.
+  btnDedupe.style.display = "none";
+
+  headerRow1.append(title, btnSettings);
+  headerRow2.append(btnScan, btnRelocate, btnDedupe);
+  header.append(headerRow1, headerRow2);
+
+  // Fetch config once on panel open, toggle the dedupe button visibility.
+  // Also re-check whenever the settings modal closes (in case the user
+  // just enabled or disabled linking).
+  async function refreshDedupeButtonVisibility() {
+    try {
+      const cfg = await jsonFetch(API.config);
+      const linkingOn = !!cfg.enable_linking;
+      const method = (cfg.dedupe_method || "hash");
+      btnDedupe.style.display = (linkingOn && method !== "disabled") ? "" : "none";
+    } catch (e) {
+      // If config fetch fails, default to hidden.
+      btnDedupe.style.display = "none";
+    }
+  }
+  refreshDedupeButtonVisibility();
+  // Expose so the settings modal can call it after Save.
+  container._refreshDedupeButtonVisibility = refreshDedupeButtonVisibility;
 
   const status = el("div", {
     style: { fontSize: "12px", opacity: "0.8", minHeight: "16px" },
@@ -123,6 +155,11 @@ function buildPanel(container) {
 
   container.append(header, status, missingHeader, missingSection, jobsHeader, jobsSection);
 
+  // When the settings modal closes, refresh the dedupe button visibility.
+  // We hook into Setting modal's close by checking after a small delay
+  // every time it's opened. Simpler: poll for the modal's open state in
+  // settings handler below.
+
   // State shared by scan + per-candidate downloads
   let lastMissing = [];
 
@@ -130,8 +167,12 @@ function buildPanel(container) {
   let settingsModal = null;
 
   btnSettings.onclick = () => {
-    if (!settingsModal) settingsModal = buildSettingsModal();
-    settingsModal.open();
+    if (!settingsModal) {
+      settingsModal = buildSettingsModal();
+    }
+    // Pass our refresh callback so the modal can re-trigger the dedupe
+    // button visibility check when the user clicks Save / Close.
+    settingsModal.open(refreshDedupeButtonVisibility);
   };
 
   btnDedupe.onclick = () => {
@@ -1545,6 +1586,45 @@ function buildSettingsModal() {
     style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginLeft: "22px" },
   });
 
+  // Dedupe method (used by both the "Free Space Via Link" button and
+  // the post-download dedupe pass).
+  const dedupeRow = el("div", {
+    style: { display: "flex", alignItems: "center", gap: "8px", margin: "8px 0 4px", marginLeft: "22px" },
+  });
+  const dedupeLabel = el("span", {
+    textContent: "Duplicate detection:",
+    style: { fontSize: "12px", opacity: "0.85" },
+  });
+  const dedupeMode = el("select", {
+    style: { padding: "3px 5px", background: "var(--comfy-input-bg, #333)", color: "var(--input-text, #ddd)", border: "1px solid var(--border-color, #555)", borderRadius: "3px" },
+  });
+  for (const [v, label] of [
+    ["hash",      "SHA-256 hash (slow, 100% safe)"],
+    ["size_name", "Name + size only (fast, may false-positive)"],
+    ["disabled",  "Disabled (hide dedupe button)"],
+  ]) {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = label;
+    dedupeMode.appendChild(opt);
+  }
+  dedupeRow.append(dedupeLabel, dedupeMode);
+
+  const autoDedupeRow = el("label", {
+    style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", margin: "4px 0", marginLeft: "22px" },
+  });
+  const autoDedupeToggle = el("input", { type: "checkbox" });
+  const autoDedupeText = el("span", {
+    textContent: "After download, check for existing duplicates and replace with hardlink",
+    style: { fontSize: "12px" },
+  });
+  autoDedupeRow.append(autoDedupeToggle, autoDedupeText);
+
+  const dedupeNote = el("div", {
+    textContent: "Hash mode reads every byte of every candidate file - slow but never wrong. Name+size is instant but two unrelated files could in theory collide. The 'Free Space Via Link' button (in the panel header) and the post-download dedupe pass both use this setting.",
+    style: { fontSize: "11px", opacity: "0.7", marginTop: "4px", marginLeft: "22px" },
+  });
+
   const flash = el("div", {
     style: {
       fontSize: "12px",
@@ -1563,10 +1643,16 @@ function buildSettingsModal() {
   const btnClearCiv = el("button", { textContent: "Clear CivitAI", style: { padding: "3px 8px", fontSize: "11px", cursor: "pointer" } });
   btnRow.append(btnClearHF, btnClearCiv, btnSave, btnClose);
 
-  // Disable mode-select when toggle is off, for clarity.
+  // Disable mode-select / dedupe controls when linking toggle is off,
+  // since they're meaningless without it.
   function syncLinkUI() {
-    linkMode.disabled = !linkToggle.checked;
-    linkMode.style.opacity = linkToggle.checked ? "1" : "0.5";
+    const on = linkToggle.checked;
+    linkMode.disabled = !on;
+    linkMode.style.opacity = on ? "1" : "0.5";
+    dedupeMode.disabled = !on;
+    dedupeMode.style.opacity = on ? "1" : "0.5";
+    autoDedupeToggle.disabled = !on;
+    autoDedupeRow.style.opacity = on ? "1" : "0.5";
   }
   linkToggle.addEventListener("change", syncLinkUI);
   syncLinkUI();
@@ -1577,6 +1663,7 @@ function buildSettingsModal() {
     civLabel, civInput, civStatus,
     note,
     sep, linkHeader, linkToggleRow, linkModeRow, linkNote,
+    dedupeRow, autoDedupeRow, dedupeNote,
     flash, btnRow,
   );
   overlay.append(box);
@@ -1629,6 +1716,11 @@ function buildSettingsModal() {
       // Make sure the option exists, then select it.
       const opts = Array.from(linkMode.options).map(o => o.value);
       linkMode.value = opts.includes(mode) ? mode : "auto";
+      // Dedupe settings
+      const dedupe = cfg.dedupe_method || "hash";
+      const dopts = Array.from(dedupeMode.options).map(o => o.value);
+      dedupeMode.value = dopts.includes(dedupe) ? dedupe : "hash";
+      autoDedupeToggle.checked = cfg.auto_dedupe_after_download !== false; // default true
       syncLinkUI();
       return cfg;
     } catch (e) {
@@ -1658,6 +1750,8 @@ function buildSettingsModal() {
         civitai_token: civVal,
         enable_linking: linkToggle.checked,
         linking_mode: linkMode.value,
+        dedupe_method: dedupeMode.value,
+        auto_dedupe_after_download: autoDedupeToggle.checked,
       };
       const resp = await jsonFetch(API.config, {
         method: "POST",
@@ -1718,11 +1812,31 @@ function buildSettingsModal() {
       showFlash("Clear failed: " + e.message, "#ef9a9a");
     }
   };
-  btnClose.onclick = () => { overlay.style.display = "none"; };
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = "none"; };
+  // closeCallback is set by .open() so the panel can refresh its button
+  // visibility when the modal closes (e.g. user just toggled linking).
+  let onCloseCallback = null;
+  function close() {
+    overlay.style.display = "none";
+    if (typeof onCloseCallback === "function") {
+      try { onCloseCallback(); } catch (e) { /* ignore */ }
+    }
+  }
+  btnClose.onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  // Also re-fire the close callback right after Save so the panel updates
+  // even if the user keeps the modal open.
+  const _origSave = btnSave.onclick;
+  btnSave.onclick = async () => {
+    await _origSave.call(btnSave);
+    if (typeof onCloseCallback === "function") {
+      try { onCloseCallback(); } catch (e) { /* ignore */ }
+    }
+  };
 
   return {
-    open: () => {
+    open: (cb) => {
+      onCloseCallback = cb || null;
       overlay.style.display = "flex";
       refreshStatus();
     },
