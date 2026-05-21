@@ -221,7 +221,7 @@ class DownloadManager:
             old = list(self._jobs.items())
             removed = 0
             for jid, j in old:
-                if j.status in ("done", "error", "cancelled"):
+                if j.status in ("done", "linked", "error", "cancelled"):
                     del self._jobs[jid]
                     removed += 1
             return removed

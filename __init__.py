@@ -5,9 +5,14 @@ and downloads them automatically from HuggingFace and CivitAI.
 """
 
 from .server import register_routes
+from .separator_compat import install as _install_separator_compat
 
 # Register HTTP routes on import
 register_routes()
+
+# On Windows, expose forward-slash variants for filename lists so workflows
+# authored with "/" separators don't appear missing in ComfyUI loader nodes.
+_install_separator_compat()
 
 # Tell ComfyUI where the JS frontend lives
 WEB_DIRECTORY = "./web"

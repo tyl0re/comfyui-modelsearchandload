@@ -143,6 +143,8 @@ FIELD_TO_FOLDER = {
     "clip_name1": "text_encoders",
     "clip_name2": "text_encoders",
     "clip_name3": "text_encoders",
+    "gemma_path": "text_encoders",
+    "ltxv_path": "checkpoints",
     "unet_name": "unet",
     "diffusion_model": "diffusion_models",
     "model_name": "upscale_models",

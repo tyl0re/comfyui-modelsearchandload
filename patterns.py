@@ -67,11 +67,32 @@ def filename_aliases(name: str) -> list[str]:
         return []
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
     out: list[str] = [base]
+
+    # Some workflow/plugin authors add local-only decorative prefixes to
+    # filenames even when the upstream file omits them, e.g.
+    # comfy_gemma_3_12B_it.safetensors -> gemma_3_12B_it.safetensors.
+    # Keep this conservative: only strip clearly Comfy-related prefixes.
+    decorative_prefixes = (
+        "comfy_",
+        "comfy-",
+        "comfyui_",
+        "comfyui-",
+    )
+    base_lc = base.lower()
+    for prefix in decorative_prefixes:
+        if base_lc.startswith(prefix) and len(base) > len(prefix):
+            out.append(base[len(prefix):])
     # Hyphen <-> underscore swap
     if "-" in base:
         out.append(base.replace("-", "_"))
     if "_" in base:
         out.append(base.replace("_", "-"))
+    # Also apply separator swaps to generated aliases.
+    for v in list(out):
+        if "-" in v:
+            out.append(v.replace("-", "_"))
+        if "_" in v:
+            out.append(v.replace("_", "-"))
     # Lower-case variants
     out += [v.lower() for v in list(out) if v != v.lower()]
     # Deduplicate, preserve order

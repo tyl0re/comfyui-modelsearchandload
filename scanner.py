@@ -253,6 +253,22 @@ def _is_locally_present(
         # query. A file at e.g. models/diffusion_models/ltx2/foo does not
         # satisfy a workflow asking a lora loader for ltx2/foo.
         if expected_folder:
+            # ComfyUI validates widget values against get_filename_list(), and
+            # on Windows that list can contain backslash-separated subpaths.
+            # A filesystem probe may resolve "foo/bar.safetensors", while the
+            # node dropdown may expose "foo\\bar.safetensors". Treat either
+            # separator spelling as locally present; separator_compat makes the
+            # UI accept both forms on Windows.
+            if folder_paths is not None:
+                try:
+                    choices = [str(f).lower() for f in folder_paths.get_filename_list(expected_folder) or []]
+                    normalized_choices = {c.replace("\\", "/") for c in choices}
+                    if raw.lower() in choices:
+                        return True
+                    if raw_norm in normalized_choices:
+                        return True
+                except Exception:
+                    pass
             bucket = index.get(expected_folder)
             if bucket and raw_norm in bucket:
                 return True
@@ -336,9 +352,15 @@ def _is_locally_present(
 
 
 def _guess_folder_for_field(field: str, value: str) -> str | None:
-    # Filename-based overrides take priority over field-name mapping. This
-    # catches cases where a generic field name (e.g. clip_name) is paired
-    # with a specifically-named file (e.g. clip_vision_h.safetensors).
+    # Precise field-name mapping wins first. This reflects the actual folder
+    # the node uses via folder_paths.get_filename_list/get_full_path. Filename
+    # heuristics are only fallback/refinement for generic fields, because the
+    # same basename can validly live in multiple folders depending on the node
+    # (e.g. LTXVideo loads the 22B model via checkpoints, while UNET loaders
+    # use diffusion_models/unet).
+    if field in FIELD_TO_FOLDER:
+        return FIELD_TO_FOLDER[field]
+
     v_lc = (value or "").lower()
     bn_lc = os.path.basename(v_lc.replace("\\", "/"))
 
@@ -453,8 +475,6 @@ def _guess_folder_for_field(field: str, value: str) -> str | None:
             return "sams"
         return "onnx"  # generic fallback
 
-    if field in FIELD_TO_FOLDER:
-        return FIELD_TO_FOLDER[field]
     f = field.lower()
     if "ckpt" in f or "checkpoint" in f:
         return "checkpoints"
@@ -565,6 +585,7 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     "QuadrupleCLIPLoaderGGUF":       [(0, "clip"), (1, "clip"), (2, "clip"), (3, "clip")],
     "LTXVGemmaCLIPModelLoader":      [(0, "text_encoders"), (1, "checkpoints")],
     "LTXAVTextEncoderLoader":        [(0, "text_encoders"), (1, "checkpoints")],
+    "LTXVGemmaAPIConditioning":      [(3, "checkpoints")],
     # Kijai's ComfyUI-WanAnimatePreprocess: ViTPose + YOLO ONNX models go
     # into models/detection/ (the node registers this folder itself).
     # Slot 0 = vitpose_model, slot 1 = yolo_model.

@@ -92,6 +92,9 @@ def _filename_match_type(requested: str, candidate: str) -> str:
     cand_norm = normalise_filename(cand_lc)
     if cand_norm == req_norm:
         return "normalized"
+    req_alias_norms = {normalise_filename(alias) for alias in filename_aliases(req)}
+    if cand_norm in req_alias_norms:
+        return "normalized"
     req_base = req_lc.rsplit(".", 1)[0]
     cand_base = cand_lc.rsplit(".", 1)[0]
     if req_base and (req_base in cand_base or cand_base in req_base):
@@ -201,6 +204,9 @@ def _annotate_confidence(filename: str, candidates: list[dict]) -> None:
                 if c.get("_alias_match"):
                     score -= 35
                     reasons.append("upstream file uses a different name")
+                elif c.get("_decorative_alias_match"):
+                    score += 8
+                    reasons.append("workflow-only filename prefix was ignored")
             elif source == "civitai":
                 score += 5
                 reasons.append("CivitAI file match")
@@ -372,7 +378,12 @@ def lookup_known_or_pattern(filename: str, folder_hint: str | None = None) -> di
             "source":   known.get("source", "known"),
             "title":    known.get("title", filename),
             "filename": filename,
-            "folder":   known.get("folder", folder_hint or "checkpoints"),
+            # A folder_hint comes from the concrete ComfyUI node/slot that
+            # referenced the file. Prefer it over learned/curated basename
+            # entries because the same filename can be valid in multiple
+            # folders (e.g. LTXVideo loads the 22B model via checkpoints,
+            # while other loaders may use diffusion_models/unet).
+            "folder":   folder_hint or known.get("folder", "checkpoints"),
             "url":      known["url"],
             "size":     known.get("size"),
             "gated":    known.get("gated", False),
@@ -462,8 +473,9 @@ def _build_hf_queries(filename: str) -> list[str]:
         seen.add(norm)
         queries.append(q)
 
-    add(filename)
-    add(filename.rsplit(".", 1)[0])
+    for alias in filename_aliases(filename):
+        add(alias)
+        add(alias.rsplit(".", 1)[0])
 
     # Consecutive token spans, longest first (more distinctive)
     parts = _split_tokens(filename)
@@ -506,13 +518,16 @@ def _build_hf_fulltext_queries(filename: str) -> list[str]:
             seen.add(q.lower())
             queries.append(q)
 
-    # 1. Just the basename without extension - this catches files mentioned
-    #    verbatim in READMEs (e.g. "film_net_fp16" -> Comfy-Org/frame_interpolation)
-    add(base)
-    # 2. Same but with separators turned into spaces
-    add(base.replace("_", " ").replace("-", " ").replace(".", " "))
-    # 3. The full filename including extension
-    add(filename)
+    # 1. Basenames with and without decorative workflow prefixes. This catches
+    #    files mentioned verbatim in READMEs, including upstream names that omit
+    #    a local-only prefix like "comfy_".
+    for alias in filename_aliases(filename):
+        alias_base = alias.rsplit(".", 1)[0]
+        add(alias_base)
+        # 2. Same but with separators turned into spaces.
+        add(alias_base.replace("_", " ").replace("-", " ").replace(".", " "))
+        # 3. The full filename including extension.
+        add(alias)
     # 4. Top tokens joined by spaces (good for partial matches)
     if len(tokens) >= 2:
         add(" ".join(tokens[:3]))
@@ -573,7 +588,7 @@ _AUTHOR_FILENAME_HINTS: dict[str, tuple[str, ...]] = {
     "black-forest-labs": ("flux", "ae.safe", "ae.bin"),
     "runwayml":          ("v1-5-pruned", "v1_5_pruned", "stable-diffusion-v1-5"),
     "comfyanonymous":    ("clip_l.", "clip_g.", "t5xxl", "flux_text"),
-    "Comfy-Org":         ("sigclip", "frame_interp", "rife", "v1-5-pruned"),
+    "Comfy-Org":         ("sigclip", "frame_interp", "rife", "v1-5-pruned", "ltx", "gemma"),
     "lllyasviel":        ("control_", "controlnet", "annotator", "realesrgan_x4plus.pth"),
     "h94":               ("ip-adapter", "ip_adapter", "image_encoder", "clip-vit-h-14-laion", "clip-vit-bigg"),
     "latent-consistency":("lcm-lora", "lcm_lora"),
@@ -640,7 +655,7 @@ def _hf_probe_trusted_authors(filename: str, max_authors: int = 3) -> list[dict]
     sibling array so the calling code's siblings-pass picks them up
     without an extra round-trip.
     """
-    target = filename.lower()
+    targets = {alias.lower() for alias in filename_aliases(filename)}
     out: list[dict] = []
     for author in _authors_for_filename(filename, max_authors=max_authors):
         repos = _hf_list_author_repos(author, limit=100)
@@ -654,7 +669,7 @@ def _hf_probe_trusted_authors(filename: str, max_authors: int = 3) -> list[dict]
             for s in siblings:
                 rfn = (s.get("rfilename") or "").replace("\\", "/")
                 rfn_base = rfn.rsplit("/", 1)[-1]
-                if rfn.lower() == target or rfn_base.lower() == target:
+                if rfn.lower() in targets or rfn_base.lower() in targets:
                     out.append({
                         "repo": repo_id,
                         "via": "trusted-author",
@@ -681,6 +696,7 @@ _HF_FALLBACK_REPOS: list[tuple[str, tuple[str, ...]]] = [
     ("Kijai/LTX2-IC-LoRAs",          ("ltx",)),
     ("Kijai/Z-Image_comfy_fp8_scaled", ("z-image", "zimage")),
     ("Comfy-Org/frame_interpolation", ("film", "rife", "frame")),
+    ("Comfy-Org/ltx-2",             ("ltx", "gemma")),
     ("Comfy-Org/flux1-dev",          ("flux",)),
     ("comfyanonymous/flux_text_encoders", ("clip_l", "t5xxl")),
     ("lightx2v/Wan2.2-Distill-Loras", ("wan", "lightx2v", "distill")),
@@ -744,7 +760,9 @@ def _hf_find_file_in_repo(
     pass. Callers can use ``alias`` to decide whether to rename the
     file on download.
     """
-    norm_target = normalise_filename(filename)
+    original_norm_target = normalise_filename(filename)
+    norm_targets = {normalise_filename(alias) for alias in filename_aliases(filename)}
+    path_targets = {alias.lower() for alias in filename_aliases(filename)}
     files = _hf_list_repo_files(repo_id)
 
     # Strict pass
@@ -753,11 +771,13 @@ def _hf_find_file_in_repo(
         if not path:
             continue
         bn = path.rsplit("/", 1)[-1]
-        if normalise_filename(bn) == norm_target or path.lower() == filename.lower():
+        bn_norm = normalise_filename(bn)
+        if bn_norm in norm_targets or path.lower() in path_targets:
             return {
                 "path": path,
                 "size": f.get("size"),
                 "alias": False,
+                "decorative_alias": bn_norm != original_norm_target,
             }
 
     # Alias pass - only if the caller opted in. We require that the
@@ -817,7 +837,8 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
                us the exact path inside the repo.
     """
     tokens = set(_tokenize_filename(filename))
-    target = filename.lower()
+    target_names = {alias.lower() for alias in filename_aliases(filename)}
+    target_norms = {normalise_filename(alias) for alias in filename_aliases(filename)}
     headers = _hf_headers()
 
     # Collect repo candidates from both endpoints.
@@ -932,9 +953,17 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
         file_size: int | None = None
         for s in c.get("siblings") or []:
             rfn = (s.get("rfilename") or "").replace("\\", "/")
-            if rfn.lower() == target or rfn.lower().endswith("/" + target):
+            rfn_lc = rfn.lower()
+            rfn_base = rfn.rsplit("/", 1)[-1]
+            if (
+                rfn_lc in target_names
+                or rfn_base.lower() in target_names
+                or normalise_filename(rfn_base) in target_norms
+            ):
                 file_path = rfn
                 file_size = s.get("size")
+                if normalise_filename(rfn_base) != normalise_filename(filename):
+                    c["_decorative_alias_match"] = True
                 break
         if file_path is not None:
             confirmed.append((c, file_path, file_size))
@@ -978,6 +1007,8 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
                 # path should still be the workflow's filename - the user's
                 # workflow is the source of truth for naming.
                 c["_alias_match"] = True
+            if hit.get("decorative_alias"):
+                c["_decorative_alias_match"] = True
 
     # ----- Phase 4: well-known fallback repos -----
     # If neither repo-search nor README-fulltext found the file, probe a
@@ -1030,7 +1061,8 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
             "gated": bool(gated),
             "_query": c.get("_query"),
             "_via": c["via"],
-            "_match_type": "alias" if c.get("_alias_match") else "exact",
+            "_match_type": "alias" if c.get("_alias_match") else _filename_match_type(filename, file_path.rsplit("/", 1)[-1]),
+            "_decorative_alias_match": bool(c.get("_decorative_alias_match")),
         })
 
     # Deduplicate (same repo+path)
@@ -1503,7 +1535,11 @@ def find_candidates(
     when downloads tie.
     """
     # Cache lookup
-    cache_key = filename if not source_hint else f"{filename}\0{source_hint}"
+    cache_key = "\0".join([
+        filename or "",
+        folder_hint or "",
+        source_hint or "",
+    ])
     cached = _search_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _CACHE_TTL_S:
         out = list(cached[1])

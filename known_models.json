@@ -312,6 +312,50 @@
     "_reason": "FlashVSR LQ projection model. Standalone variant - usually integrated in the main fp32 file."
   },
 
+  "_section_ltx23": "LTX-2.3 model and LoRAs. The base model may be requested by LTXVideo via checkpoints while other loaders may use diffusion_models/unet; resolver folder_hint decides the actual destination.",
+  "ltx-2.3-22b-dev.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-dev.safetensors",
+    "source": "huggingface",
+    "size": null,
+    "_reason": "LTX-2.3 22B dev base model. Folder may be overridden by node-specific folder_hint for LTXVideo checkpoint loaders."
+  },
+  "ltx-2.3-22b-distilled-lora-384-1.1.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+    "source": "huggingface",
+    "size": 7605507256,
+    "_reason": "Official LTX-2.3 distilled LoRA for 384px workflows."
+  },
+  "ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-LipDub/resolve/main/ltx-2.3-22b-ic-lora-lipdub-0.9.safetensors",
+    "source": "huggingface",
+    "size": 2466665072,
+    "_reason": "Official LTX-2.3 IC LoRA LipDub release."
+  },
+  "ltx-2.3_text_projection_bf16.safetensors": {
+    "folder": "text_encoders",
+    "url": "https://huggingface.co/Kijai/LTX2.3_comfy/resolve/main/text_encoders/ltx-2.3_text_projection_bf16.safetensors",
+    "source": "huggingface",
+    "size": 2312149072,
+    "_reason": "LTX-2.3 text projection used by DualCLIPLoader/LTXV text encoder workflows."
+  },
+  "ltx23_inpaint_masked_r2v_rank32_v1_3000steps.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/Alissonerdx/LTX-LoRAs/resolve/main/ltx23_inpaint_masked_r2v_rank32_v1_3000steps.safetensors",
+    "source": "huggingface",
+    "size": 327287384,
+    "_reason": "LTX-2.3 inpaint masked R2V LoRA used by LoraLoaderModelOnly."
+  },
+  "LTX2.3_Crisp_Enhance.safetensors": {
+    "folder": "loras",
+    "url": "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Crisp_Enhance_Style_LoRa/resolve/main/LTX2.3_Crisp_Enhance.safetensors",
+    "source": "huggingface",
+    "size": null,
+    "_reason": "LTX-2.3 Crisp Enhance style LoRA used by LoraLoaderModelOnly."
+  },
+
   "_section_wan21_control_loras": "spacepxl/Wan2.1-control-loras hosts depth and tile control LoRAs for Wan2.1 1.3b. The HF tokenizer splits 'wan2.1' into 'wan2 1' and the files live in nested subfolders (1.3b/tile/, 1.3b/depth/) - the regular search returns unrelated full-text hits.",
   "wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors": {
     "folder": "loras",
