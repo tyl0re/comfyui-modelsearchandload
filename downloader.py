@@ -4,12 +4,66 @@ from __future__ import annotations
 
 import collections
 import os
+import re
 import threading
 import time
 import uuid
 import urllib.request
 import urllib.error
 from typing import Any
+
+
+_HF_FILE_URL = re.compile(
+    r"^(https?://huggingface\.co/[^/]+/[^/]+)(?:/(?:resolve|blob|tree|raw)/.*)?$",
+    re.IGNORECASE,
+)
+
+
+def _repo_page_url(url: str | None) -> str | None:
+    """Return the HuggingFace repo landing page for a file URL, or None.
+
+    Used by the UI to deep-link to the model card so the user can accept
+    a gated license when a 401/403 download fails.
+    """
+    if not url:
+        return None
+    m = _HF_FILE_URL.match(url)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def resolve_hf_token(cfg: dict | None = None) -> str | None:
+    """Look up a HuggingFace token from multiple sources.
+
+    Priority:
+      1. Plugin Settings ("huggingface_token")
+      2. Environment variables HF_TOKEN, HUGGING_FACE_HUB_TOKEN
+      3. ``~/.cache/huggingface/token`` (HuggingFace CLI login)
+
+    Accepting a gated model on the HF web UI binds the license to the
+    account that is logged in. The token authenticates the download as
+    that same account, so the retry succeeds.
+    """
+    if cfg is None:
+        cfg = load_config()
+    tok = (cfg.get("huggingface_token") or "").strip()
+    if tok:
+        return tok
+    for env_var in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        env_val = (os.environ.get(env_var) or "").strip()
+        if env_val:
+            return env_val
+    try:
+        token_file = os.path.expanduser("~/.cache/huggingface/token")
+        if os.path.isfile(token_file):
+            with open(token_file, "r", encoding="utf-8") as f:
+                data = f.read().strip()
+            if data:
+                return data
+    except Exception:
+        pass
+    return None
 
 from .config import load_config
 from .scanner import get_target_directory
@@ -39,6 +93,9 @@ class DownloadJob:
         # connecting | linking | linked | downloading | done | error | cancelled
         self.status = "connecting"
         self.error: str | None = None
+        # HTTP status code captured from the last failed attempt. Lets the UI
+        # offer "open repo page" + "retry" buttons for 401/403 auth errors.
+        self.error_code: int | None = None
         self.bytes_done: int = 0
         self.bytes_total: int = 0
         # If we resolved this job by linking, these record what we did.
@@ -104,6 +161,15 @@ class DownloadJob:
             "source": self.source,
             "status": self.status,
             "error": self.error,
+            "error_code": self.error_code,
+            # For HuggingFace gated models the UI shows a button that opens
+            # the repo's license page so the user can accept it and retry.
+            "repo_page_url": _repo_page_url(self.url),
+            # Lets the UI decide whether to ask for a token inline when an
+            # auth error happens. We never expose the token itself here.
+            "has_hf_token": bool(
+                "huggingface.co" in (self.url or "") and resolve_hf_token()
+            ),
             "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
             "progress": progress,
@@ -216,6 +282,60 @@ class DownloadManager:
         job.cancel()
         return True
 
+    def requeue(self, job_id: str) -> DownloadJob | None:
+        """Re-run a finished/errored job using the same url/destination.
+
+        Used by the UI's retry button after the user accepted a gated
+        model license or set a fresh HF/CivitAI token in Settings.
+
+        Honours the same active-job dedupe rules as :meth:`enqueue` so a
+        double-clicked Retry button can't spawn a second parallel download
+        for the same file.
+        """
+        old = self._jobs.get(job_id)
+        if not old:
+            return None
+        if old.status in ("queued", "connecting", "linking", "downloading"):
+            return old
+
+        active_states = ("queued", "connecting", "linking", "downloading")
+        target_dir_n = os.path.abspath(old.dest_dir).lower()
+        target_path = os.path.abspath(old.dest_path).lower()
+        filename_lc = old.filename.lower()
+
+        with self._lock:
+            for existing in self._jobs.values():
+                if existing is old:
+                    continue
+                if existing.status not in active_states:
+                    continue
+                if existing.filename.lower() != filename_lc:
+                    continue
+                ex_dir_n = os.path.abspath(existing.dest_dir).lower()
+                ex_path_n = os.path.abspath(existing.dest_path).lower()
+                if ex_dir_n == target_dir_n or ex_path_n == target_path:
+                    print(
+                        f"[ModelDownloader] retry dedupe: '{old.filename}' already "
+                        f"in flight (job {existing.id}, status={existing.status}); "
+                        f"reusing instead of starting a new one"
+                    )
+                    existing._is_duplicate_of_active = True
+                    return existing
+
+        os.makedirs(old.dest_dir, exist_ok=True)
+        new_job = DownloadJob(
+            url=old.url,
+            dest_dir=old.dest_dir,
+            filename=old.filename,
+            source=old.source,
+            expected_size=old.expected_size,
+        )
+        with self._lock:
+            self._jobs[new_job.id] = new_job
+        t = threading.Thread(target=self._run, args=(new_job,), daemon=True)
+        t.start()
+        return new_job
+
     def clear_finished(self) -> int:
         with self._lock:
             old = list(self._jobs.items())
@@ -231,8 +351,10 @@ class DownloadManager:
     def _build_request(self, job: DownloadJob, resume_from: int = 0) -> urllib.request.Request:
         cfg = load_config()
         headers = {"User-Agent": "ComfyUI-ModelDownloader/1.0"}
-        if "huggingface.co" in job.url and cfg.get("huggingface_token"):
-            headers["Authorization"] = f"Bearer {cfg['huggingface_token']}"
+        if "huggingface.co" in job.url:
+            tok = resolve_hf_token(cfg)
+            if tok:
+                headers["Authorization"] = f"Bearer {tok}"
         elif "civitai.com" in job.url and cfg.get("civitai_token"):
             # CivitAI accepts token in either header or as ?token= query string
             sep = "&" if "?" in job.url else "?"
@@ -300,8 +422,10 @@ class DownloadManager:
         try:
             req = urllib.request.Request(url, method="HEAD")
             cfg = load_config()
-            if "huggingface.co" in url and cfg.get("huggingface_token"):
-                req.add_header("Authorization", f"Bearer {cfg['huggingface_token']}")
+            if "huggingface.co" in url:
+                tok = resolve_hf_token(cfg)
+                if tok:
+                    req.add_header("Authorization", f"Bearer {tok}")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 cl = resp.headers.get("Content-Length")
                 return int(cl) if cl else None
@@ -351,9 +475,26 @@ class DownloadManager:
                     if e.code == 404:
                         msg += " (file not found - the URL is wrong; please open an issue with the filename)"
                     elif e.code in (401, 403):
-                        msg += " (auth required - set HF/CivitAI token in Settings, and accept the model license on the HF web UI)"
+                        had_token = bool(
+                            "huggingface.co" in job.url
+                            and resolve_hf_token()
+                        )
+                        if had_token:
+                            msg += (
+                                " (your HuggingFace token did not have access. "
+                                "Open the repo page, accept the license with the SAME "
+                                "account the token belongs to, then click Retry)"
+                            )
+                        else:
+                            msg += (
+                                " (no HuggingFace token found. Set huggingface_token "
+                                "in Settings or run 'huggingface-cli login', then click Retry)"
+                            )
                     elif e.code == 429:
                         msg += " (rate limited - try again in a minute)"
+                    # Surface the HTTP status code so the UI can offer
+                    # context-specific actions (e.g. "open repo page" + retry).
+                    job.error_code = e.code
                     print(f"[ModelDownloader] download failed for '{job.filename}': {msg}")
                     raise RuntimeError(msg) from e
 

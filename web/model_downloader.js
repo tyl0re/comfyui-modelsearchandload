@@ -17,6 +17,7 @@ const API = {
   jobs:         "/model_downloader/jobs",
   cancel:       "/model_downloader/cancel",
   clear:        "/model_downloader/clear",
+  retry:        "/model_downloader/retry",
   config:       "/model_downloader/config",
 };
 
@@ -1305,11 +1306,78 @@ function createJobRow(j) {
     style: { color: "#ef9a9a", fontSize: "10px", display: "none" },
   });
 
-  row.append(name, bar, line1, line2, errEl);
+  // Action row for errored jobs: "Open repo page" + optional token input +
+  // "Retry". Hidden by default; shown when the backend reports an auth-style
+  // failure (HTTP 401/403) so the user can accept the model's license and
+  // resume without re-scanning. The token input is only displayed when no HF
+  // token is configured yet, and gets persisted to plugin Settings on retry.
+  const actionEl = el("div", {
+    style: { display: "none", flexDirection: "column", gap: "4px", marginTop: "2px" },
+  });
+  const actionRow = el("div", {
+    style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" },
+  });
+  const btnOpenRepo = el("button", {
+    textContent: "Open repo page",
+    style: {
+      padding: "2px 8px",
+      fontSize: "10px",
+      cursor: "pointer",
+      background: "#1976d2",
+      color: "#fff",
+      border: "0",
+      borderRadius: "3px",
+    },
+  });
+  btnOpenRepo.title =
+    "Open the HuggingFace model card so you can accept the license. " +
+    "Accept it with the SAME account whose token is configured here, then click Retry.";
+  const btnRetry = el("button", {
+    textContent: "Retry",
+    style: {
+      padding: "2px 8px",
+      fontSize: "10px",
+      cursor: "pointer",
+      background: "transparent",
+      color: "#bbb",
+      border: "1px solid #555",
+      borderRadius: "3px",
+    },
+  });
+  btnRetry.title = "Re-run this download after accepting the license / setting a token.";
+  actionRow.append(btnOpenRepo, btnRetry);
+
+  const tokenWrap = el("div", {
+    style: { display: "none", gap: "6px", alignItems: "center", fontSize: "10px" },
+  });
+  const tokenInput = el("input", {
+    type: "password",
+    placeholder: "hf_… token (saved to plugin Settings)",
+    style: {
+      flex: "1 1 auto",
+      minWidth: "120px",
+      padding: "2px 6px",
+      fontSize: "10px",
+      background: "#111",
+      color: "#ddd",
+      border: "1px solid #555",
+      borderRadius: "3px",
+    },
+  });
+  tokenInput.title =
+    "Paste a HuggingFace access token (read access). It's saved to the plugin's " +
+    "Settings and reused for future downloads. The retry will run authenticated.";
+  tokenWrap.append(tokenInput);
+  actionEl.append(actionRow, tokenWrap);
+
+  row.append(name, bar, line1, line2, errEl, actionEl);
 
   return {
     row,
-    els: { name, bar, barFill, statusEl, pctEl, bytesEl, speedEl, etaEl, btnCancel, errEl },
+    els: {
+      name, bar, barFill, statusEl, pctEl, bytesEl, speedEl, etaEl, btnCancel, errEl,
+      actionEl, actionRow, btnOpenRepo, btnRetry, tokenWrap, tokenInput,
+    },
     // Smoothing state: extrapolate bytes_done between polls based on the
     // server-reported speed so the bar moves continuously.
     smoothBytes: 0,
@@ -1408,6 +1476,54 @@ function updateJobRow(entry, j) {
     els.errEl.textContent = j.error;
   } else {
     els.errEl.style.display = "none";
+  }
+
+  // Auth-style failures: surface "Open repo page" + optional token input +
+  // "Retry" so the user can accept a gated HF license (or paste a token) and
+  // resume without losing the scanned-missing context. The token field is
+  // only shown when the backend reports that no HF token is configured yet.
+  const isAuthError = j.status === "error" && (j.error_code === 401 || j.error_code === 403);
+  if (isAuthError) {
+    els.actionEl.style.display = "flex";
+    els.btnOpenRepo.style.display = j.repo_page_url ? "" : "none";
+    els.btnOpenRepo.onclick = () => {
+      if (j.repo_page_url) window.open(j.repo_page_url, "_blank", "noopener");
+    };
+    // Token input only when no token is configured server-side. If the user
+    // already has a token but still got 401/403, the issue is license/account
+    // mismatch, not a missing token — don't ask for another one.
+    els.tokenWrap.style.display = j.has_hf_token ? "none" : "flex";
+    // Avoid double-firing: keep button disabled while a retry is in flight,
+    // and re-enable only on outright failure. The poll loop will move the row
+    // out of the "error" state on success, which hides the action row.
+    if (!entry._retryInFlight) {
+      els.btnRetry.disabled = false;
+      els.btnRetry.textContent = "Retry";
+    }
+    els.btnRetry.onclick = () => {
+      if (entry._retryInFlight) return;
+      entry._retryInFlight = true;
+      els.btnRetry.disabled = true;
+      els.btnRetry.textContent = "Retrying...";
+      const body = { id: j.id };
+      const tok = (els.tokenInput.value || "").trim();
+      if (tok) body.huggingface_token = tok;
+      jsonFetch(API.retry, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }).then(() => {
+        els.tokenInput.value = "";
+      }).catch(() => {
+        entry._retryInFlight = false;
+        els.btnRetry.disabled = false;
+        els.btnRetry.textContent = "Retry";
+      });
+    };
+  } else {
+    els.actionEl.style.display = "none";
+    // Job left the error state - clear the retry latch so a future failure
+    // is once again actionable.
+    entry._retryInFlight = false;
   }
 }
 

@@ -152,6 +152,39 @@ def register_routes() -> None:
         n = manager.clear_finished()
         return web.json_response({"removed": n})
 
+    @routes.post("/model_downloader/retry")
+    async def _retry(request: web.Request):
+        """Re-run a finished/errored download (same URL + destination).
+
+        Body: {
+            "id": "<job_id>",
+            "huggingface_token": "<optional new token>",
+        }
+
+        If a token is supplied, it is persisted to the plugin config first so
+        the retried download (and any future ones) use it for authentication.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        jid = payload.get("id")
+        if not jid:
+            return web.json_response({"error": "id required"}, status=400)
+        new_token = (payload.get("huggingface_token") or "").strip()
+        if new_token:
+            from .config import load_config, save_config
+            cfg = load_config()
+            cfg["huggingface_token"] = new_token
+            save_config(cfg)
+        job = manager.requeue(jid)
+        if not job:
+            return web.json_response({"error": "job not found"}, status=404)
+        return web.json_response({
+            "job": job.to_dict(),
+            "token_saved": bool(new_token),
+        })
+
     @routes.post("/model_downloader/relocate")
     async def _relocate(request: web.Request):
         """Try to move files that are already on disk but in the wrong place
