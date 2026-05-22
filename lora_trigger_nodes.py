@@ -241,7 +241,7 @@ class LoRATriggerInspector:
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("trigger", "top_tags", "info")
     FUNCTION = "inspect"
-    CATEGORY = "ModelDownloader/LoRA"
+    CATEGORY = "l0re/LoRA"
 
     @classmethod
     def IS_CHANGED(cls, lora_name, top_n):  # pragma: no cover - ComfyUI hook
@@ -308,7 +308,7 @@ class LoRATagSelector:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("triggers", "preview")
     FUNCTION = "select"
-    CATEGORY = "ModelDownloader/LoRA"
+    CATEGORY = "l0re/LoRA"
 
     @classmethod
     def IS_CHANGED(cls, lora_name, include_dataset_trigger, dataset_trigger_weight, selected_tags):
@@ -361,7 +361,7 @@ class AppendLoRATriggers:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("prompt",)
     FUNCTION = "merge"
-    CATEGORY = "ModelDownloader/LoRA"
+    CATEGORY = "l0re/LoRA"
 
     def merge(self, prompt, triggers, position, separator, extra_triggers: str = ""):
         bits: list[str] = []
