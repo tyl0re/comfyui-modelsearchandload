@@ -94,13 +94,11 @@ function buildPanel(container) {
   const btnScan = el("button", { textContent: "Scan workflow" });
   const btnRelocate = el("button", { textContent: "Move existing" });
   const btnDedupe = el("button", { textContent: "Free Space Via Link" });
-  const btnLoraTags = el("button", { textContent: "Read LoRA tags" });
   const btnSettings = el("button", { textContent: "Settings" });
 
   btnDedupe.title = "Find duplicate model files anywhere in your models tree and replace duplicates with hardlinks pointing at one master copy. Frees disk space without breaking any workflow. Visibility depends on whether linking is enabled in Settings.";
-  btnLoraTags.title = "Pick a LoRA, read its trigger words + training tags from the safetensors metadata, and write the selection into a 'LoRA Tag Selector' node in the canvas.";
 
-  for (const b of [btnScan, btnRelocate, btnDedupe, btnLoraTags, btnSettings]) {
+  for (const b of [btnScan, btnRelocate, btnDedupe, btnSettings]) {
     Object.assign(b.style, {
       padding: "5px 10px",
       cursor: "pointer",
@@ -119,7 +117,7 @@ function buildPanel(container) {
   btnDedupe.style.display = "none";
 
   headerRow1.append(title, btnSettings);
-  headerRow2.append(btnScan, btnRelocate, btnDedupe, btnLoraTags);
+  headerRow2.append(btnScan, btnRelocate, btnDedupe);
   header.append(headerRow1, headerRow2);
 
   // Fetch config once on panel open, toggle the dedupe button visibility.
@@ -185,12 +183,6 @@ function buildPanel(container) {
 
   btnDedupe.onclick = () => {
     runDedupeFlow(status);
-  };
-
-  btnLoraTags.onclick = () => {
-    runLoraTagFlow(status).catch((e) => {
-      status.textContent = "LoRA tag reader failed: " + (e?.message || e);
-    });
   };
 
   function setActionsEnabled(enabled) {
@@ -2274,11 +2266,19 @@ function _setLoraSelectorWidget(node, text) {
   return true;
 }
 
+function _setLoraStatus(statusEl, msg, color = "#ffb74d") {
+  if (statusEl && "textContent" in statusEl) {
+    statusEl.textContent = msg;
+  } else {
+    showToast(document.body, msg, color);
+  }
+}
+
 async function runLoraTagFlow(statusEl) {
   const data = await jsonFetch(API.lora_list);
   const loras = (data && data.loras) || [];
   if (!loras.length) {
-    statusEl.textContent = "No LoRAs found on disk.";
+    _setLoraStatus(statusEl, "No LoRAs found on disk.");
     return;
   }
 
@@ -2497,7 +2497,7 @@ async function runLoraTagFlow(statusEl) {
       tagsArea.style.display = "flex";
       btnApply.style.display = "";
     } catch (e) {
-      statusEl.textContent = "Failed to read LoRA meta: " + (e?.message || e);
+      _setLoraStatus(statusEl, "Failed to read LoRA meta: " + (e?.message || e), "#ef5350");
     } finally {
       btnNext.disabled = false;
       btnNext.textContent = "Read tags →";
@@ -2507,13 +2507,16 @@ async function runLoraTagFlow(statusEl) {
   btnApply.onclick = () => {
     const text = (tagsPreview.value || "").trim();
     if (!text) {
-      statusEl.textContent = "Nothing selected.";
+      _setLoraStatus(statusEl, "Nothing selected.");
       return;
     }
     const nodes = _findLoraTagSelectorNodes();
     if (nodes.length === 0) {
-      statusEl.textContent =
-        "Add a 'LoRA Tag Selector' node to the canvas first, then click 'Read LoRA tags' again.";
+      _setLoraStatus(
+        statusEl,
+        "Add a 'LoRA Tag Selector' node to the canvas first, then click 'Read LoRA tags' again.",
+        "#ef5350",
+      );
       return;
     }
     let target = nodes[0];
@@ -2525,10 +2528,14 @@ async function runLoraTagFlow(statusEl) {
     }
     const ok = _setLoraSelectorWidget(target, text);
     if (ok) {
-      statusEl.textContent = `Wrote ${text.split("\n").filter(Boolean).length} tag(s) into LoRA Tag Selector node #${target.id}.`;
+      _setLoraStatus(
+        statusEl,
+        `Wrote ${text.split("\n").filter(Boolean).length} tag(s) into LoRA Tag Selector node #${target.id}.`,
+        "#66bb6a",
+      );
       close();
     } else {
-      statusEl.textContent = "Could not write into the node; widget missing.";
+      _setLoraStatus(statusEl, "Could not write into the node; widget missing.", "#ef5350");
     }
   };
 }
@@ -2537,6 +2544,28 @@ async function runLoraTagFlow(statusEl) {
 
 app.registerExtension({
   name: "comfyui.model_downloader",
+  // Top menu integration: adds "l0re > Read LoRA tags" to ComfyUI's main menu
+  // (the new menubar shown when you expand the ComfyUI menu, the same place
+  // KJNodes / Impact Pack put their entries).
+  commands: [
+    {
+      id: "l0re.lora.readTags",
+      label: "Read LoRA tags",
+      menubarLabel: "Read LoRA tags",
+      tooltip: "Pick a LoRA, read its trigger words + training tags, and write the selection into a 'LoRA Tag Selector' node in the canvas.",
+      function: () => {
+        runLoraTagFlow(null).catch((e) => {
+          showToast(document.body, "LoRA tag reader failed: " + (e?.message || e), "#ef5350");
+        });
+      },
+    },
+  ],
+  menuCommands: [
+    {
+      path: ["l0re", "LoRA"],
+      commands: ["l0re.lora.readTags"],
+    },
+  ],
   async setup() {
     if (app.extensionManager?.registerSidebarTab) {
       app.extensionManager.registerSidebarTab({
