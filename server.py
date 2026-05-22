@@ -135,6 +135,36 @@ def register_routes() -> None:
     async def _jobs(request: web.Request):
         return web.json_response({"jobs": manager.list_jobs()})
 
+    @routes.get("/model_downloader/lora_list")
+    async def _lora_list(request: web.Request):
+        """List every LoRA visible to ComfyUI (sorted alphabetically).
+
+        Used by the sidebar's "Read LoRA tags" picker.
+        """
+        try:
+            import folder_paths  # ComfyUI core
+            files = sorted(folder_paths.get_filename_list("loras") or [],
+                           key=str.lower)
+        except Exception as e:
+            return web.json_response({"loras": [], "error": str(e)}, status=200)
+        return web.json_response({"loras": files})
+
+    @routes.get("/model_downloader/lora_meta")
+    async def _lora_meta(request: web.Request):
+        """Return trigger words + top training tags for a LoRA.
+
+        Query string: ``?name=<lora filename>&top=<n>``.
+        """
+        name = request.rel_url.query.get("name")
+        if not name:
+            return web.json_response({"error": "name required"}, status=400)
+        try:
+            top_n = max(1, min(int(request.rel_url.query.get("top", "20")), 200))
+        except ValueError:
+            top_n = 20
+        from .lora_trigger_nodes import info_for
+        return web.json_response(info_for(name, top_n=top_n))
+
     @routes.post("/model_downloader/cancel")
     async def _cancel(request: web.Request):
         try:

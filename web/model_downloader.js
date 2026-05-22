@@ -18,6 +18,8 @@ const API = {
   cancel:       "/model_downloader/cancel",
   clear:        "/model_downloader/clear",
   retry:        "/model_downloader/retry",
+  lora_list:    "/model_downloader/lora_list",
+  lora_meta:    "/model_downloader/lora_meta",
   config:       "/model_downloader/config",
 };
 
@@ -92,11 +94,13 @@ function buildPanel(container) {
   const btnScan = el("button", { textContent: "Scan workflow" });
   const btnRelocate = el("button", { textContent: "Move existing" });
   const btnDedupe = el("button", { textContent: "Free Space Via Link" });
+  const btnLoraTags = el("button", { textContent: "Read LoRA tags" });
   const btnSettings = el("button", { textContent: "Settings" });
 
   btnDedupe.title = "Find duplicate model files anywhere in your models tree and replace duplicates with hardlinks pointing at one master copy. Frees disk space without breaking any workflow. Visibility depends on whether linking is enabled in Settings.";
+  btnLoraTags.title = "Pick a LoRA, read its trigger words + training tags from the safetensors metadata, and write the selection into a 'LoRA Tag Selector' node in the canvas.";
 
-  for (const b of [btnScan, btnRelocate, btnDedupe, btnSettings]) {
+  for (const b of [btnScan, btnRelocate, btnDedupe, btnLoraTags, btnSettings]) {
     Object.assign(b.style, {
       padding: "5px 10px",
       cursor: "pointer",
@@ -115,7 +119,7 @@ function buildPanel(container) {
   btnDedupe.style.display = "none";
 
   headerRow1.append(title, btnSettings);
-  headerRow2.append(btnScan, btnRelocate, btnDedupe);
+  headerRow2.append(btnScan, btnRelocate, btnDedupe, btnLoraTags);
   header.append(headerRow1, headerRow2);
 
   // Fetch config once on panel open, toggle the dedupe button visibility.
@@ -181,6 +185,12 @@ function buildPanel(container) {
 
   btnDedupe.onclick = () => {
     runDedupeFlow(status);
+  };
+
+  btnLoraTags.onclick = () => {
+    runLoraTagFlow(status).catch((e) => {
+      status.textContent = "LoRA tag reader failed: " + (e?.message || e);
+    });
   };
 
   function setActionsEnabled(enabled) {
@@ -2230,6 +2240,296 @@ function buildSettingsModal() {
       overlay.style.display = "flex";
       refreshStatus();
     },
+  };
+}
+
+// ---------- LoRA tag reader ----------
+//
+// Sidebar workflow: user clicks "Read LoRA tags", picks a LoRA from a modal,
+// the backend returns trigger phrases + top training tags, the user ticks
+// which ones to use (with weights), and we write the resulting text into a
+// `LoraTagSelector` node on the canvas. Both the node's `selected_tags`
+// widget value and its visible text are updated immediately, no restart.
+
+function _findLoraTagSelectorNodes() {
+  const graph = app?.graph;
+  if (!graph || !Array.isArray(graph._nodes)) return [];
+  return graph._nodes.filter((n) => n?.type === "LoraTagSelector");
+}
+
+function _setLoraSelectorWidget(node, text) {
+  if (!node) return false;
+  const widget = (node.widgets || []).find((w) => w?.name === "selected_tags");
+  if (!widget) return false;
+  widget.value = text;
+  if (typeof widget.callback === "function") {
+    try { widget.callback(text); } catch (_) { /* ignore */ }
+  }
+  if (node.onWidgetChanged) {
+    try { node.onWidgetChanged(widget.name, text, widget.value, widget); } catch (_) {}
+  }
+  // Refresh canvas so the new value renders without restart.
+  if (app?.graph?.setDirtyCanvas) app.graph.setDirtyCanvas(true, true);
+  if (app?.canvas?.setDirty) app.canvas.setDirty(true, true);
+  return true;
+}
+
+async function runLoraTagFlow(statusEl) {
+  const data = await jsonFetch(API.lora_list);
+  const loras = (data && data.loras) || [];
+  if (!loras.length) {
+    statusEl.textContent = "No LoRAs found on disk.";
+    return;
+  }
+
+  // Build modal: LoRA picker + (after pick) tag selection with weights.
+  const overlay = el("div", {
+    style: {
+      position: "fixed", inset: "0",
+      background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 10000,
+    },
+  });
+  const modal = el("div", {
+    style: {
+      background: "var(--comfy-menu-bg, #2a2a2a)",
+      color: "var(--input-text, #ddd)",
+      border: "1px solid var(--border-color, #555)",
+      borderRadius: "6px",
+      padding: "14px",
+      minWidth: "480px", maxWidth: "720px",
+      maxHeight: "80vh", overflow: "auto",
+      display: "flex", flexDirection: "column", gap: "10px",
+      fontFamily: "sans-serif", fontSize: "13px",
+    },
+  });
+  const title = el("div", {
+    textContent: "Read LoRA tags",
+    style: { fontWeight: "bold", fontSize: "14px" },
+  });
+
+  const search = el("input", {
+    type: "text",
+    placeholder: "Filter LoRA…",
+    style: {
+      padding: "6px 8px", borderRadius: "4px",
+      border: "1px solid #555", background: "#111", color: "#ddd",
+    },
+  });
+  const list = el("select", {
+    size: 12,
+    style: {
+      width: "100%", background: "#111", color: "#ddd",
+      border: "1px solid #555", borderRadius: "4px", padding: "4px",
+    },
+  });
+  function rebuildList(filterText) {
+    list.innerHTML = "";
+    const lc = (filterText || "").toLowerCase().trim();
+    for (const name of loras) {
+      if (lc && !name.toLowerCase().includes(lc)) continue;
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      list.appendChild(opt);
+    }
+    if (list.options.length > 0) list.selectedIndex = 0;
+  }
+  rebuildList("");
+  search.oninput = () => rebuildList(search.value);
+
+  const tagsArea = el("div", { style: { display: "none", flexDirection: "column", gap: "8px" } });
+  const tagsTitle = el("div", { style: { fontWeight: "bold" } });
+  const tagsList = el("div", {
+    style: {
+      display: "flex", flexDirection: "column", gap: "4px",
+      maxHeight: "260px", overflow: "auto",
+      padding: "6px", background: "#111", borderRadius: "4px",
+      border: "1px solid #444",
+    },
+  });
+  const tagsPreviewLabel = el("div", {
+    textContent: "Preview (this will be written into the node):",
+    style: { fontSize: "11px", opacity: "0.7" },
+  });
+  const tagsPreview = el("textarea", {
+    rows: 4,
+    style: {
+      background: "#111", color: "#ddd",
+      border: "1px solid #555", borderRadius: "4px", padding: "6px",
+      fontFamily: "monospace", fontSize: "12px",
+    },
+  });
+  tagsArea.append(tagsTitle, tagsList, tagsPreviewLabel, tagsPreview);
+
+  const buttonRow = el("div", {
+    style: { display: "flex", gap: "8px", justifyContent: "flex-end" },
+  });
+  const btnClose = el("button", { textContent: "Close" });
+  const btnNext = el("button", { textContent: "Read tags →" });
+  const btnApply = el("button", { textContent: "Write into node" });
+  btnApply.style.display = "none";
+  for (const b of [btnClose, btnNext, btnApply]) {
+    Object.assign(b.style, {
+      padding: "5px 12px", cursor: "pointer",
+      background: "#333", color: "#ddd",
+      border: "1px solid #555", borderRadius: "4px",
+    });
+  }
+  btnApply.style.background = "#1976d2";
+  btnApply.style.color = "#fff";
+  btnApply.style.borderColor = "#1976d2";
+
+  buttonRow.append(btnClose, btnNext, btnApply);
+  modal.append(title, search, list, tagsArea, buttonRow);
+  overlay.append(modal);
+  document.body.appendChild(overlay);
+
+  function close() {
+    document.body.removeChild(overlay);
+  }
+  btnClose.onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  // State for the tag-selection step.
+  const tagRows = [];   // [{ tag, weight, checkbox, weightInput }]
+  let triggerPhrases = [];
+
+  function rebuildPreview() {
+    const parts = [];
+    for (const r of tagRows) {
+      if (!r.checkbox.checked) continue;
+      const tag = r.tag.trim();
+      if (!tag) continue;
+      const w = Number(r.weightInput.value);
+      if (!Number.isFinite(w) || Math.abs(w - 1.0) < 1e-3) {
+        parts.push(tag);
+      } else {
+        parts.push(`${tag} :: ${w.toFixed(2)}`);
+      }
+    }
+    tagsPreview.value = parts.join("\n");
+  }
+
+  function tagRow(tag, count, weight, checked) {
+    const row = el("label", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "auto 1fr auto 70px",
+        gap: "6px", alignItems: "center",
+        fontSize: "12px",
+      },
+    });
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = !!checked;
+    const lbl = el("span", { textContent: tag });
+    const cnt = el("span", {
+      textContent: count != null ? String(count) : "",
+      style: { opacity: "0.6", fontSize: "11px", textAlign: "right" },
+    });
+    const w = el("input", {
+      type: "number",
+      value: String(weight),
+      step: "0.05", min: "0", max: "3",
+      style: {
+        background: "#1a1a1a", color: "#ddd",
+        border: "1px solid #555", borderRadius: "3px",
+        padding: "2px 4px", width: "60px",
+      },
+    });
+    cb.onchange = rebuildPreview;
+    w.oninput = rebuildPreview;
+    row.append(cb, lbl, cnt, w);
+    tagRows.push({ tag, weight, checkbox: cb, weightInput: w });
+    return row;
+  }
+
+  btnNext.onclick = async () => {
+    const opt = list.options[list.selectedIndex];
+    if (!opt) return;
+    btnNext.disabled = true;
+    btnNext.textContent = "Loading…";
+    try {
+      const url = `${API.lora_meta}?name=${encodeURIComponent(opt.value)}&top=30`;
+      const meta = await jsonFetch(url);
+      tagsList.innerHTML = "";
+      tagRows.length = 0;
+      triggerPhrases = Array.isArray(meta.triggers) ? meta.triggers.slice() : [];
+
+      const summaryBits = [];
+      if (meta.title) summaryBits.push(meta.title);
+      if (meta.architecture) summaryBits.push(meta.architecture);
+      tagsTitle.textContent = summaryBits.length
+        ? `${opt.value}  —  ${summaryBits.join("  ·  ")}`
+        : opt.value;
+
+      if (triggerPhrases.length) {
+        const triggersHeader = el("div", {
+          textContent: "Dataset trigger phrases (checked by default):",
+          style: { fontSize: "11px", opacity: "0.7" },
+        });
+        tagsList.appendChild(triggersHeader);
+        for (const t of triggerPhrases) {
+          tagsList.appendChild(tagRow(t, null, 1.0, true));
+        }
+      }
+      if (Array.isArray(meta.top_tags) && meta.top_tags.length) {
+        const tagsHeader = el("div", {
+          textContent: "Top training tags (pick the ones to keep):",
+          style: { fontSize: "11px", opacity: "0.7", marginTop: "4px" },
+        });
+        tagsList.appendChild(tagsHeader);
+        for (const t of meta.top_tags) {
+          tagsList.appendChild(tagRow(t.tag, t.count, 1.0, false));
+        }
+      }
+      if (!triggerPhrases.length && (!meta.top_tags || !meta.top_tags.length)) {
+        const empty = el("div", {
+          textContent: meta.error
+            ? `No metadata: ${meta.error}`
+            : "No trigger words or training tags found in this LoRA.",
+          style: { opacity: "0.7", fontStyle: "italic" },
+        });
+        tagsList.appendChild(empty);
+      }
+      rebuildPreview();
+      tagsArea.style.display = "flex";
+      btnApply.style.display = "";
+    } catch (e) {
+      statusEl.textContent = "Failed to read LoRA meta: " + (e?.message || e);
+    } finally {
+      btnNext.disabled = false;
+      btnNext.textContent = "Read tags →";
+    }
+  };
+
+  btnApply.onclick = () => {
+    const text = (tagsPreview.value || "").trim();
+    if (!text) {
+      statusEl.textContent = "Nothing selected.";
+      return;
+    }
+    const nodes = _findLoraTagSelectorNodes();
+    if (nodes.length === 0) {
+      statusEl.textContent =
+        "Add a 'LoRA Tag Selector' node to the canvas first, then click 'Read LoRA tags' again.";
+      return;
+    }
+    let target = nodes[0];
+    if (nodes.length > 1) {
+      // Prefer the currently selected node if it is a LoraTagSelector.
+      const selected = (app.canvas?.selected_nodes || {});
+      const selList = Object.values(selected).filter((n) => n?.type === "LoraTagSelector");
+      if (selList.length === 1) target = selList[0];
+    }
+    const ok = _setLoraSelectorWidget(target, text);
+    if (ok) {
+      statusEl.textContent = `Wrote ${text.split("\n").filter(Boolean).length} tag(s) into LoRA Tag Selector node #${target.id}.`;
+      close();
+    } else {
+      statusEl.textContent = "Could not write into the node; widget missing.";
+    }
   };
 }
 
