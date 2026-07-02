@@ -1,5 +1,9 @@
 # ComfyUI Model Search and Load
 
+<p align="center">
+  <img src="assets/logo.svg" alt="ComfyUI Model Search and Load logo" width="128" height="128">
+</p>
+
 A ComfyUI extension that scans your loaded workflow for missing model
 files, finds them on HuggingFace and CivitAI, and downloads them straight
 into the correct folder. Saves disk space by hardlinking copies you

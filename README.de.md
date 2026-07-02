@@ -1,5 +1,9 @@
 # ComfyUI Model Search and Load
 
+<p align="center">
+  <img src="assets/logo.svg" alt="ComfyUI Model Search and Load Logo" width="128" height="128">
+</p>
+
 Eine ComfyUI-Erweiterung, die einen geladenen Workflow nach fehlenden
 Modell-Dateien durchsucht, sie auf HuggingFace und CivitAI findet und
 direkt in den korrekten Ordner herunterlädt. Spart Speicherplatz indem
