@@ -356,6 +356,22 @@
     "_reason": "LTX-2.3 Crisp Enhance style LoRA used by LoraLoaderModelOnly."
   },
 
+  "_section_hunyuan3d": "ComfyUI-Hunyuan3DWrapper loads its shape DiT files through folder_paths.get_filename_list('diffusion_models'), which maps to models/unet and models/diffusion_models on current ComfyUI installs. These are not regular checkpoints even though many manual downloads place them in checkpoints.",
+  "hunyuan3d-dit-v2-0-fp16.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/Hunyuan3D-2_safetensors/resolve/main/hunyuan3d-dit-v2-0-fp16.safetensors",
+    "source": "huggingface",
+    "size": 4928151594,
+    "_reason": "Hy3DModelLoader in ComfyUI-Hunyuan3DWrapper loads this from diffusion_models via folder_paths.get_full_path('diffusion_models', model)."
+  },
+  "hunyuan_3d_v2.1.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Comfy-Org/hunyuan3D_2.1_repackaged/resolve/main/hunyuan_3d_v2.1.safetensors",
+    "source": "huggingface",
+    "size": null,
+    "_reason": "Hy3D_2_1SimpleMeshGen in ComfyUI-Hunyuan3DWrapper loads this from diffusion_models, not checkpoints."
+  },
+
   "_section_wan21_control_loras": "spacepxl/Wan2.1-control-loras hosts depth and tile control LoRAs for Wan2.1 1.3b. The HF tokenizer splits 'wan2.1' into 'wan2 1' and the files live in nested subfolders (1.3b/tile/, 1.3b/depth/) - the regular search returns unrelated full-text hits.",
   "wan2.1-1.3b-control-lora-tile-v0.2_comfy.safetensors": {
     "folder": "loras",

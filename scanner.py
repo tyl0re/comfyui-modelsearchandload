@@ -660,6 +660,18 @@ UI_NODE_MODEL_SLOTS: dict[str, list[tuple[int, str]]] = {
     # WanVideoExtraModelSelect: extra model file (e.g. FlashVSR LQ_proj, VACE)
     # loaded from unet_gguf + diffusion_models. We surface as diffusion_models.
     "WanVideoExtraModelSelect":      [(0, "diffusion_models")],
+    # ComfyUI-Hunyuan3DWrapper: shape DiT models are loaded from
+    # models/diffusion_models/, not checkpoints.
+    "Hy3DModelLoader":               [(0, "diffusion_models")],
+    "Hy3D_2_1SimpleMeshGen":         [(0, "diffusion_models")],
+    "Hy3DVAELoader":                 [(0, "vae")],
+}
+
+
+API_NODE_MODEL_FIELDS: dict[str, dict[str, str]] = {
+    "Hy3DModelLoader":       {"model": "diffusion_models"},
+    "Hy3D_2_1SimpleMeshGen": {"model": "diffusion_models"},
+    "Hy3DVAELoader":         {"model_name": "vae"},
 }
 
 _STRICT_UI_NODE_FOLDERS: set[str] = {
@@ -686,6 +698,13 @@ def _iter_api_inputs(node: dict) -> Iterable[tuple[str, str]]:
         for k, v in inputs.items():
             if isinstance(v, str):
                 yield k, v
+
+
+def _guess_folder_for_api_field(node_type: str, field: str) -> str | None:
+    fields = API_NODE_MODEL_FIELDS.get(node_type)
+    if not fields:
+        return None
+    return fields.get(field)
 
 
 def _iter_ui_widgets(node: dict) -> Iterable[tuple[str, str, str]]:
@@ -789,7 +808,8 @@ def scan_workflow(workflow: dict) -> list[dict]:
             for field, value in _iter_api_inputs(node):
                 if not _looks_like_model_filename(value):
                     continue
-                folder_hint = _guess_folder_for_field(field, value) \
+                folder_hint = _guess_folder_for_api_field(node_type, field) \
+                    or _guess_folder_for_field(field, value) \
                     or _guess_folder_for_node_type(node_type)
                 candidates.append((field, value, folder_hint))
 
