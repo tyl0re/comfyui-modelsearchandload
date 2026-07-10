@@ -20,6 +20,7 @@ const API = {
   retry:        "/model_downloader/retry",
   lora_list:    "/model_downloader/lora_list",
   lora_meta:    "/model_downloader/lora_meta",
+  update_notice: "/model_downloader/update_notice",
   config:       "/model_downloader/config",
 };
 
@@ -56,6 +57,19 @@ function el(tag, props = {}, children = []) {
     node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
   }
   return node;
+}
+
+async function checkUpdateNotice() {
+  try {
+    const info = await jsonFetch(API.update_notice);
+    if (!info?.update_available) return;
+    const branch = info.branch ? ` (${info.branch})` : "";
+    const remote = info.remote ? `\nRemote: ${info.remote.slice(0, 12)}` : "";
+    const local = info.local ? `\nLocal:  ${info.local.slice(0, 12)}` : "";
+    alert(`Model Search and Load update available${branch}.${local}${remote}\n\nUpdate the custom node to get the latest fixes.`);
+  } catch (e) {
+    // Silent by design: update checks should never disturb normal ComfyUI use.
+  }
 }
 
 // ---------- Sidebar UI ----------
@@ -2567,6 +2581,7 @@ app.registerExtension({
     },
   ],
   async setup() {
+    checkUpdateNotice();
     if (app.extensionManager?.registerSidebarTab) {
       app.extensionManager.registerSidebarTab({
         id: "modelDownloader",

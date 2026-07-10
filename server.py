@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from aiohttp import web
 
 try:
@@ -17,6 +19,50 @@ from .config import load_config, save_config, DEFAULT_CONFIG, save_user_known_mo
 
 
 _REGISTERED = False
+
+
+def _git_commit(args: list[str], timeout: float = 6.0) -> str:
+    out = subprocess.check_output(
+        ["git", *args],
+        cwd=os.path.dirname(__file__),
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=timeout,
+    )
+    return out.strip()
+
+
+def _plugin_update_notice() -> dict:
+    cfg = load_config()
+    if not cfg.get("update_check_enabled", True):
+        return {"update_available": False, "disabled": True}
+
+    try:
+        local = _git_commit(["rev-parse", "HEAD"])
+        branch = _git_commit(["rev-parse", "--abbrev-ref", "HEAD"])
+        remote_info = _git_commit(["ls-remote", "--heads", "origin", branch], timeout=8.0)
+    except Exception as e:
+        return {"update_available": False, "error": str(e)}
+
+    if not remote_info:
+        return {"update_available": False, "local": local, "branch": branch}
+
+    remote = remote_info.split()[0]
+    if not remote or remote == local:
+        return {"update_available": False, "local": local, "remote": remote, "branch": branch}
+
+    if cfg.get("last_update_notice_commit") == remote:
+        return {"update_available": False, "already_notified": True, "local": local, "remote": remote, "branch": branch}
+
+    cfg["last_update_notice_commit"] = remote
+    save_config(cfg)
+    return {
+        "update_available": True,
+        "local": local,
+        "remote": remote,
+        "branch": branch,
+        "message": "A Model Search and Load update is available.",
+    }
 
 
 def register_routes() -> None:
@@ -164,6 +210,10 @@ def register_routes() -> None:
             top_n = 20
         from .lora_trigger_nodes import info_for
         return web.json_response(info_for(name, top_n=top_n))
+
+    @routes.get("/model_downloader/update_notice")
+    async def _update_notice(request: web.Request):
+        return web.json_response(_plugin_update_notice())
 
     @routes.post("/model_downloader/cancel")
     async def _cancel(request: web.Request):

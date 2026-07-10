@@ -64,6 +64,10 @@ DEFAULT_CONFIG = {
     # the second and subsequent runs of 'Free Space Via Link'.
     # When False, every scan rehashes everything from scratch.
     "use_hash_cache": True,
+    # Check the git remote for plugin updates and show one notification per
+    # unseen remote commit. The last notified commit is local runtime state.
+    "update_check_enabled": True,
+    "last_update_notice_commit": "",
 }
 
 
