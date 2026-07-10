@@ -1011,17 +1011,20 @@ def search_huggingface(filename: str, limit_per_query: int = 1000) -> list[dict]
                 c["_decorative_alias_match"] = True
 
     # ----- Phase 4: well-known fallback repos -----
-    # If neither repo-search nor README-fulltext found the file, probe a
-    # short list of umbrella repos that we know host many ComfyUI files in
-    # subdirectories with no README listing. This catches files like
-    # "Wan22-I2V-A14B-LOW-rCM1_0_lora_rank_64_bf16.safetensors" living in
-    # Kijai/WanVideo_comfy/LoRAs/rCM/ - the filename has zero match against
-    # the repo name and isn't mentioned in any README.
-    if not confirmed:
+    # Probe a short list of umbrella repos that we know host many ComfyUI
+    # files in subdirectories with no README listing. Run this even if earlier
+    # phases found weak/fulltext candidates: a direct file hit in a canonical
+    # fallback repo should not be suppressed by an unrelated README alias hit.
+    if len(confirmed) < 5:
+        confirmed_paths = {
+            (c.get("repo"), file_path.replace("\\", "/").lower())
+            for c, file_path, _ in confirmed
+        }
         for repo_id, file_path, file_size in _hf_check_fallback_repos(filename):
-            if repo_id in seen_repos:
+            key = (repo_id, file_path.replace("\\", "/").lower())
+            if key in confirmed_paths:
                 continue
-            seen_repos.add(repo_id)
+            confirmed_paths.add(key)
             synthetic = {
                 "repo": repo_id,
                 "via": "fallback",

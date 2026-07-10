@@ -246,6 +246,13 @@
     "size": 1474162024,
     "_reason": "Wan2.1 T2V 1.3B in fp8 quant; same repo as bf16."
   },
+  "Wan2_1_UniLumos_1_3B_bf16.safetensors": {
+    "folder": "diffusion_models",
+    "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/UniLumos/Wan2_1_UniLumos_1_3B_bf16.safetensors",
+    "source": "huggingface",
+    "size": 2838470544,
+    "_reason": "Wan2.1 UniLumos 1.3B bf16 lives under UniLumos/ in Kijai/WanVideo_comfy. HF full-text search can return unrelated alias hits first, so pin the canonical subfolder path."
+  },
   "Wan2_1_VAE_bf16.safetensors": {
     "folder": "vae",
     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors",
