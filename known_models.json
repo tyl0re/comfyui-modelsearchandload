@@ -267,6 +267,14 @@
     "size": 507591244,
     "_reason": "Wan2.1 VAE in fp32. Same repo."
   },
+  "Wan2.1_VAE.pth": {
+    "folder": "vae",
+    "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/Wan2.1_VAE.pth",
+    "source": "huggingface",
+    "size": 507609880,
+    "aliases": ["Wan2_1_VAE.pth"],
+    "_reason": "Official Wan-AI Wan2.1 VAE .pth from Wan2.1-T2V-1.3B. HF search otherwise ranks community mirrors and NABLA repos above the official source."
+  },
   "Wan2_2_VAE_bf16.safetensors": {
     "folder": "vae",
     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_2_VAE_bf16.safetensors",
